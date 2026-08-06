@@ -1,11 +1,5 @@
 import type { LabelCount } from "../results";
-
-export interface Schema {
-  nodeLabels: LabelCount[];
-  edgeLabels: LabelCount[];
-  /** How many entities were sampled to derive these labels. */
-  sample: number;
-}
+import type { Schema } from "../schema";
 
 interface Props {
   schema: Schema | null;

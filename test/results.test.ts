@@ -23,6 +23,18 @@ describe("response envelopes", () => {
     expect(readResult({ data: { rows: [{ id: 2 }] } }, shape)).toMatchObject({ rows: [{ id: 2 }] });
   });
 
+  it("unwraps Explorer-compatible properties envelopes and virtual columns", () => {
+    expect(
+      readResult({ rows: { properties: [{ $id: 7, $label: "User", name: "Alice" }] } }, shape),
+    ).toMatchObject({ rows: [{ id: 7, label: "User", name: "Alice" }] });
+  });
+
+  it("keeps virtual identity when a stored property has the same name", () => {
+    expect(
+      readResult({ rows: { properties: [{ $id: 7, id: 999, $label: "User", label: "custom" }] } }, shape),
+    ).toMatchObject({ rows: [{ id: 7, label: "User" }] });
+  });
+
   it("falls back to the only key present", () => {
     expect(readResult({ somethingElse: [{ id: 3 }] }, shape)).toMatchObject({ rows: [{ id: 3 }] });
   });
@@ -55,6 +67,12 @@ describe("counts", () => {
     expect(
       readResult({ rows: [{ key: "User", count: 4 }, { key: "Post", count: 9 }] }, shape),
     ).toMatchObject({ groups: expected });
+    expect(
+      readResult({ rows: { properties: [{ $label: "User", count: 4 }, { $label: "Post", count: 9 }] } }, shape),
+    ).toMatchObject({ groups: expected });
+    expect(
+      readResult({ rows: { properties: [{ $label: "User" }, { $label: "Post" }, { $label: "Post" }] } }, shape),
+    ).toMatchObject({ groups: [{ label: "Post", count: 2 }, { label: "User", count: 1 }] });
   });
 });
 
@@ -135,6 +153,19 @@ describe("graph decoding", () => {
       label: "User",
       properties: { name: "Alice" },
     });
+  });
+
+  it("reads Explorer-compatible graph identity fields and envelopes", () => {
+    const result = readResult(
+      {
+        nodes: { properties: [{ $id: 1, $label: "User", name: "Alice" }, { $id: 2, $label: "User" }] },
+        edges: { properties: [{ $id: 8, $label: "Follows", $from: 1, $to: 2 }] },
+      },
+      shape,
+    );
+    if (result.kind !== "graph") throw new Error("expected a graph");
+    expect(result.graph.nodes[0]).toEqual({ id: "1", label: "User", properties: { name: "Alice" } });
+    expect(result.graph.edges[0]).toEqual({ id: "8", label: "Follows", source: "1", target: "2" });
   });
 
   it("keys entities as strings so bigint and number ids still match", () => {

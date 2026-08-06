@@ -1,7 +1,7 @@
 //! Backend for the Helix Visualizer desktop app.
 //!
 //! The webview never talks to HelixDB directly: it hands a serialized query AST
-//! to [`run_query`], which posts it to `POST {url}/v2/query`. Going through Rust
+//! to [`run_query`], which posts it to `POST {url}/v1/query`. Going through Rust
 //! keeps the app free of webview CORS rules, lets it reach plain-HTTP local
 //! instances from an `https`-origin webview, and keeps the API key in the
 //! backend's config file instead of webview storage.
@@ -15,8 +15,8 @@ use tauri::{Manager, State};
 
 /// Path segments appended to the configured base URL. Kept as segments because
 /// `PathSegmentsMut::push` percent-encodes anything it is given, so pushing
-/// `"v2/query"` in one go would produce `v2%2Fquery`.
-const QUERY_PATH_SEGMENTS: [&str; 2] = ["v2", "query"];
+/// `"v1/query"` in one go would produce `v1%2Fquery`.
+const QUERY_PATH_SEGMENTS: [&str; 2] = ["v1", "query"];
 const CONFIG_FILE: &str = "connection.json";
 const DEFAULT_URL: &str = "http://localhost:6969";
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
@@ -147,7 +147,7 @@ impl AppState {
 }
 
 /// Joins the query path onto the configured base URL, tolerating a trailing
-/// slash or an inherited path prefix (`https://gateway/helix` -> `.../helix/v2/query`).
+/// slash or an inherited path prefix (`https://gateway/helix` -> `.../helix/v1/query`).
 fn query_endpoint(base: &str) -> Result<reqwest::Url> {
     let trimmed = base.trim();
     if trimmed.is_empty() {
@@ -170,12 +170,15 @@ fn query_endpoint(base: &str) -> Result<reqwest::Url> {
     if !matches!(url.scheme(), "http" | "https") {
         return Err(AppError::InvalidUrl {
             url: base.to_string(),
-            reason: format!("unsupported scheme {:?}, expected http or https", url.scheme()),
+            reason: format!(
+                "unsupported scheme {:?}, expected http or https",
+                url.scheme()
+            ),
         });
     }
     // Pasting the full endpoint is an easy mistake to make, since that is the
     // path the docs and error messages name; appending to it again would give
-    // `/v2/query/v2/query` and an opaque 404.
+    // `/v1/query/v1/query` and an opaque 404.
     let already_endpoint = url
         .path_segments()
         .map(|s| {
@@ -189,7 +192,7 @@ fn query_endpoint(base: &str) -> Result<reqwest::Url> {
             url: base.to_string(),
             reason: "the URL cannot have a path".into(),
         })?;
-        // `pop_if_empty` stops `http://host/` from producing `//v2/query`.
+        // `pop_if_empty` stops `http://host/` from producing `//v1/query`.
         segments.pop_if_empty().extend(QUERY_PATH_SEGMENTS);
     }
     Ok(url)
@@ -356,13 +359,20 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::new())
         .setup(|app| {
-            let path = app.path().app_config_dir().ok().map(|d| d.join(CONFIG_FILE));
+            let path = app
+                .path()
+                .app_config_dir()
+                .ok()
+                .map(|d| d.join(CONFIG_FILE));
             if let Some(path) = path {
                 let state = app.state::<AppState>();
                 if let Some(saved) = load_connection(&path) {
                     *state.connection.lock().expect("connection mutex poisoned") = saved;
                 }
-                *state.config_path.lock().expect("config path mutex poisoned") = Some(path);
+                *state
+                    .config_path
+                    .lock()
+                    .expect("config path mutex poisoned") = Some(path);
             }
             Ok(())
         })
@@ -386,38 +396,47 @@ mod tests {
 
     #[test]
     fn appends_the_query_path_to_a_bare_origin() {
-        assert_eq!(endpoint("http://localhost:6969"), "http://localhost:6969/v2/query");
+        assert_eq!(
+            endpoint("http://localhost:6969"),
+            "http://localhost:6969/v1/query"
+        );
     }
 
     #[test]
     fn a_trailing_slash_does_not_double_up() {
-        assert_eq!(endpoint("http://localhost:6969/"), "http://localhost:6969/v2/query");
+        assert_eq!(
+            endpoint("http://localhost:6969/"),
+            "http://localhost:6969/v1/query"
+        );
     }
 
     #[test]
     fn a_gateway_path_prefix_is_preserved() {
         assert_eq!(
             endpoint("https://gateway.example.com/helix"),
-            "https://gateway.example.com/helix/v2/query"
+            "https://gateway.example.com/helix/v1/query"
         );
     }
 
     #[test]
     fn a_scheme_less_host_is_assumed_to_be_http() {
-        assert_eq!(endpoint("localhost:6969"), "http://localhost:6969/v2/query");
+        assert_eq!(endpoint("localhost:6969"), "http://localhost:6969/v1/query");
     }
 
     #[test]
     fn a_pasted_full_endpoint_is_not_doubled_up() {
-        assert_eq!(endpoint("http://localhost:6969/v2/query"), "http://localhost:6969/v2/query");
         assert_eq!(
-            endpoint("https://gateway.example.com/helix/v2/query/"),
-            "https://gateway.example.com/helix/v2/query/"
+            endpoint("http://localhost:6969/v1/query"),
+            "http://localhost:6969/v1/query"
+        );
+        assert_eq!(
+            endpoint("https://gateway.example.com/helix/v1/query/"),
+            "https://gateway.example.com/helix/v1/query/"
         );
         // A path that merely contains the segments elsewhere still gets them.
         assert_eq!(
-            endpoint("https://gateway.example.com/v2/query/helix"),
-            "https://gateway.example.com/v2/query/helix/v2/query"
+            endpoint("https://gateway.example.com/v1/query/helix"),
+            "https://gateway.example.com/v1/query/helix/v1/query"
         );
     }
 
@@ -430,7 +449,10 @@ mod tests {
             Some("hx_saved".into())
         );
         // An explicit empty string is the "remove the saved key" signal.
-        assert_eq!(resolve_api_key(Some(String::new()), Some("hx_saved".into())), None);
+        assert_eq!(
+            resolve_api_key(Some(String::new()), Some("hx_saved".into())),
+            None
+        );
         assert_eq!(
             resolve_api_key(Some("hx_new".into()), Some("hx_saved".into())),
             Some("hx_new".into())

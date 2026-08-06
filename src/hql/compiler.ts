@@ -637,7 +637,7 @@ function compileDescribe(statement: DescribeStatement): CompiledQuery {
   );
 }
 
-/** Compiles any HelixSQL statement into a request ready for `POST /v2/query`. */
+/** Compiles HelixSQL to the official SDK representation used for validation and mock tests. */
 export function compile(statement: Statement): CompiledQuery {
   switch (statement.kind) {
     case "select":

@@ -4,21 +4,28 @@ A Tauri desktop app for exploring a [HelixDB](https://github.com/HelixDB/helix-d
 instance: type SQL-like queries to pull back nodes, edges and their
 relationships, and draw the graph structure as a whole.
 
+See [PORTING_GUIDE.md](PORTING_GUIDE.md) for the complete Explorer-style UI,
+connection, `/v1/query`, and automatic graph-loading change log.
+
 ![the graph view](docs/graph-view.png)
 
 ## What it does
 
+- **Welcome splash** — an Explorer-style startup animation previews a valid,
+  read-only HelixSQL graph query before entering the workspace.
 - **HelixSQL** — a small, read-only SQL dialect (`SELECT … FROM NODES … WHERE …
   TRAVERSE OUT …`) that compiles to HelixDB's JSON traversal AST. Full grammar
   below.
-- **Graph view** — a `GRAPH` query draws a force-directed picture on canvas, with
-  pan, zoom, drag, neighbourhood focus on hover, and per-label colouring.
+- **Graph view** — connecting from the Graph workspace automatically loads a
+  bounded snapshot; a manual `GRAPH` query can replace it. The force-directed
+  canvas supports pan, zoom, drag, neighbourhood focus on hover, and per-label
+  colouring.
 - **Inspector** — click a node or edge to see its properties, its incident edges
   with direction, its neighbours and its degree.
 - **Schema sidebar** — node and edge labels discovered from the instance, each
   one a click away from a query.
-- **Wire format tab** — the exact JSON sent to `POST /v2/query`, so nothing about
-  the translation is hidden.
+- **Wire format tab** — the exact Explorer-compatible JSON sent to
+  `POST /v1/query`, so nothing about the translation is hidden.
 
 Queries are read-only by construction: the compiler only ever emits a `read`
 batch, and there is no syntax for writes. Use a HelixDB SDK for those.
@@ -40,8 +47,9 @@ npm install
 npm run app          # tauri dev — builds the Rust backend and opens the window
 ```
 
-Set the instance URL from the connection chip in the title bar. It is saved to
-the app config directory and reused on the next launch.
+Set the instance from Connection in the top toolbar. It is saved to the app
+config directory and prefilled on the next launch. For a Docker mapping such as
+`6969:8080`, enter the host-side port `6969`.
 
 To build a distributable:
 
@@ -54,7 +62,7 @@ run `npm run tauri icon src-tauri/icons/icon.png` once.
 
 ### Without a HelixDB instance
 
-`tools/mock-helix-server.mjs` answers `POST /v2/query` over a small in-memory
+`tools/mock-helix-server.mjs` exercises the SDK traversal representation over a small in-memory
 sample graph (users, posts, topics, orgs). It interprets the same traversal AST
 HelixDB does, for the subset of steps this app emits — it is a development
 stand-in, **not** a HelixDB implementation.
@@ -80,10 +88,11 @@ proxy instead. Point it elsewhere with `HELIX_URL=http://host:6969 npm run dev`.
 ## HelixSQL
 
 HelixDB has no SQL dialect of its own; queries are built as a JSON traversal
-AST. HelixSQL is a thin front end over that AST — every clause maps onto
-traversal steps, which the app builds with the official
-[`@helix-db/helix-db`](https://www.npmjs.com/package/@helix-db/helix-db) SDK so
-the JSON on the wire is identical to what the Rust, Go and Python SDKs emit.
+AST. HelixSQL is a thin front end over that AST. The official
+[`@helix-db/helix-db`](https://www.npmjs.com/package/@helix-db/helix-db) SDK
+representation supplies validation and result-shape metadata, while the live
+transport emits the flat Explorer-compatible format accepted by the current
+enterprise-dev `/v1/query` endpoint.
 
 Keywords are case-insensitive; labels and property names are not.
 
@@ -209,7 +218,7 @@ tools/            mock HelixDB server, icon generator
 ```
 
 The webview never talks to HelixDB directly. It hands the serialized query to
-the Rust command `run_query`, which posts it to `{url}/v2/query`. That keeps the
+the Rust command `run_query`, which posts it to `{url}/v1/query`. That keeps the
 app clear of webview CORS rules, lets an `https`-origin webview reach a
 plain-HTTP local instance, and keeps the API key in the backend's config file
 rather than in webview storage. That file is written to the platform config
@@ -228,9 +237,10 @@ npm run typecheck
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-The end-to-end tests boot the mock server and drive the full path — HelixSQL
-text, compiled AST, HTTP, decoded result. They verify this app's pipeline; they
-are not a conformance test against a real HelixDB instance.
+The end-to-end tests boot the mock server and drive the SDK-representation path
+from HelixSQL text through HTTP and decoded results. Separate legacy compiler
+tests cover the Explorer-compatible production wire format. They verify this
+app's pipelines; they are not a conformance test against every HelixDB version.
 
 ## Known limits
 

@@ -47,7 +47,7 @@ export function isDesktop(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-const BROWSER_FALLBACK_URL = "/helix/v2/query";
+const BROWSER_FALLBACK_URL = "/helix/v1/query";
 const BROWSER_CONNECTION_KEY = "helix-visualizer.browser-connection";
 
 function readBrowserConnection(): ConnectionView {

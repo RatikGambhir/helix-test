@@ -123,20 +123,25 @@ function readCount(value: unknown): number {
  */
 function readGroupCount(value: unknown): LabelCount[] {
   const groups: LabelCount[] = [];
+  const unwrapped = isRecord(value) && Array.isArray(value.properties) ? value.properties : value;
 
-  if (isRecord(value)) {
-    for (const [label, count] of Object.entries(value)) {
+  if (isRecord(unwrapped)) {
+    for (const [label, count] of Object.entries(unwrapped)) {
       groups.push({ label, count: Number(count as number | bigint) });
     }
-  } else if (Array.isArray(value)) {
-    for (const entry of value) {
+  } else if (Array.isArray(unwrapped)) {
+    const sampled = new Map<string, number>();
+    for (const entry of unwrapped) {
       if (!isRecord(entry)) continue;
       const label =
-        entry.key ?? entry.group ?? entry.label ?? entry.value ?? entry[GRAPH_FIELDS.label];
+        entry.key ?? entry.group ?? entry.label ?? entry.value ?? entry[GRAPH_FIELDS.label] ?? entry.$label;
       const count = entry.count ?? entry.total ?? entry.n;
-      if (label === undefined || count === undefined) continue;
-      groups.push({ label: stringify(label as Scalar), count: Number(count as number | bigint) });
+      if (label === undefined) continue;
+      const name = stringify(label as Scalar);
+      if (count === undefined) sampled.set(name, (sampled.get(name) ?? 0) + 1);
+      else groups.push({ label: name, count: Number(count as number | bigint) });
     }
+    for (const [label, count] of sampled) groups.push({ label, count });
   } else {
     throw new ResultError("expected a grouped count", value);
   }
@@ -147,6 +152,7 @@ function readGroupCount(value: unknown): LabelCount[] {
 function asRows(value: unknown, context: string): Row[] {
   if (value === null || value === undefined) return [];
   if (Array.isArray(value)) return value.filter(isRecord);
+  if (isRecord(value) && Array.isArray(value.properties)) return value.properties.filter(isRecord);
   if (isRecord(value)) return [value];
   throw new ResultError(`expected rows for ${context}`, value);
 }
@@ -178,22 +184,22 @@ function readLabel(value: unknown): string | null {
 }
 
 function readGraphNode(row: Row): GraphNodeData | null {
-  const id = readId(row[GRAPH_FIELDS.id]);
+  const id = readId(row[GRAPH_FIELDS.id] ?? row.$id ?? row.id);
   if (id === null) return null;
   const properties: Row = {};
   for (const [key, value] of Object.entries(row)) {
-    if (key === GRAPH_FIELDS.id || key === GRAPH_FIELDS.label) continue;
+    if ([GRAPH_FIELDS.id, GRAPH_FIELDS.label, "$id", "$label"].includes(key)) continue;
     properties[key] = value;
   }
-  return { id, label: readLabel(row[GRAPH_FIELDS.label]), properties };
+  return { id, label: readLabel(row[GRAPH_FIELDS.label] ?? row.$label ?? row.label), properties };
 }
 
 function readGraphEdge(row: Row): GraphEdgeData | null {
-  const id = readId(row[GRAPH_FIELDS.id]);
-  const source = readId(row[GRAPH_FIELDS.source]);
-  const target = readId(row[GRAPH_FIELDS.target]);
+  const id = readId(row[GRAPH_FIELDS.id] ?? row.$id ?? row.id);
+  const source = readId(row[GRAPH_FIELDS.source] ?? row.$from ?? row.from ?? row.source);
+  const target = readId(row[GRAPH_FIELDS.target] ?? row.$to ?? row.to ?? row.target);
   if (id === null || source === null || target === null) return null;
-  return { id, label: readLabel(row[GRAPH_FIELDS.label]), source, target };
+  return { id, label: readLabel(row[GRAPH_FIELDS.label] ?? row.$label ?? row.label), source, target };
 }
 
 /**
@@ -257,14 +263,31 @@ function mergeIdentity(rows: Row[], identity: Row[]): Row[] {
     for (const [key, value] of Object.entries(identity[index])) {
       // `$from.$id` reads better as `source` in a table header.
       const alias =
-        key === "$id" ? "id" : key === "$label" ? "label" : key === "$from.$id" ? "source" : key === "$to.$id" ? "target" : key;
+        key === "$id" ? "id" : key === "$label" ? "label" : key === "$from.$id" || key === "$from" ? "source" : key === "$to.$id" || key === "$to" ? "target" : key;
       merged[alias] = value;
     }
     // Identity wins: a stored property called `id` or `label` must not shadow
     // the entity's own, which is what the table keys rows by and what clicking
     // a row sends to DESCRIBE.
-    return { ...row, ...merged };
+    const properties = Object.fromEntries(
+      Object.entries(row).filter(([key]) => !["$id", "$label", "$from", "$to"].includes(key)),
+    );
+    return { ...properties, ...merged };
   });
+}
+
+function normalizeDisplayRow(row: Row): Row {
+  const normalized: Row = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (!["$id", "$label", "$from", "$to"].includes(key)) normalized[key] = value;
+  }
+  // Virtual entity identity always wins over same-named stored properties,
+  // regardless of JSON object key order in the server response.
+  if ("$id" in row) normalized.id = row.$id;
+  if ("$label" in row) normalized.label = row.$label;
+  if ("$from" in row) normalized.source = row.$from;
+  if ("$to" in row) normalized.target = row.$to;
+  return normalized;
 }
 
 /** Column order: identity first, then properties in first-seen order. */
@@ -280,7 +303,7 @@ function collectColumns(rows: Row[]): string[] {
 export function readResult(body: unknown, shape: ResultShape): QueryResult {
   switch (shape.kind) {
     case "rows": {
-      let rows = asRows(pickVariable(body, shape.variable), "rows");
+      let rows = asRows(pickVariable(body, shape.variable), "rows").map(normalizeDisplayRow);
       if (shape.identityVariable) {
         rows = mergeIdentity(rows, asRows(pickVariable(body, shape.identityVariable), "identity"));
       }
@@ -321,7 +344,10 @@ export function readResult(body: unknown, shape: ResultShape): QueryResult {
       };
 
     case "describe": {
-      const properties = asRows(pickVariable(body, shape.variables.entity), "entity")[0] ?? {};
+      const entity = asRows(pickVariable(body, shape.variables.entity), "entity")[0] ?? {};
+      const properties = Object.fromEntries(
+        Object.entries(entity).filter(([key]) => !["$id", "$label", "$from", "$to"].includes(key)),
+      );
       const identity = asRows(pickVariable(body, shape.variables.identity), "identity")[0] ?? {};
 
       if (shape.entity === "edges") {
