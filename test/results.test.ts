@@ -75,6 +75,19 @@ describe("select star", () => {
     });
   });
 
+  it("does not let a stored property shadow the entity's identity", () => {
+    // A node may store its own `id`/`label`; the row is keyed by the entity's,
+    // and clicking it sends that id to DESCRIBE.
+    const result = readResult(
+      {
+        rows: [{ id: "legacy-7", label: "user-supplied", since: 2021 }],
+        identity: [{ $id: 5n, $label: "Follows", "$from.$id": 1n, "$to.$id": 2n }],
+      },
+      shape,
+    );
+    expect(result).toMatchObject({ rows: [{ id: 5n, label: "Follows", since: 2021 }] });
+  });
+
   it("shows the properties alone rather than misaligning them", () => {
     // A length mismatch means the two passes cannot be zipped safely.
     const result = readResult({ rows: [{ a: 1 }, { a: 2 }], identity: [{ $id: 1n }] }, shape);
@@ -101,6 +114,16 @@ describe("graph decoding", () => {
     const result = readResult(body, shape);
     if (result.kind !== "graph") throw new Error("expected a graph");
     expect(result.graph.edges.map((edge) => edge.id)).toEqual(["10"]);
+    expect(result.graph.danglingEdges).toBe(1);
+  });
+
+  it("counts a repeated dangling edge once", () => {
+    const repeated = {
+      ...body,
+      edges: [...body.edges, { _id: 11, _label: "Follows", _src: 1, _dst: 99 }],
+    };
+    const result = readResult(repeated, shape);
+    if (result.kind !== "graph") throw new Error("expected a graph");
     expect(result.graph.danglingEdges).toBe(1);
   });
 
@@ -224,6 +247,26 @@ describe("label colours", () => {
   it("treats an unlabelled entity as neutral, not as a series", () => {
     const palette = new LabelPalette(["User", null, null]);
     expect(palette.colour(null, "dark")).not.toBe(palette.colour("User", "dark"));
+  });
+
+  it("gives a label genuinely named Other its own hue", () => {
+    // The bucket's name must not swallow a real label, or the two would share
+    // the neutral colour and the legend would show the name twice.
+    const palette = new LabelPalette([OTHER_LABEL, OTHER_LABEL, "User", null]);
+    expect(palette.colour(OTHER_LABEL, "dark")).not.toBe(palette.colour(null, "dark"));
+
+    const bucket = palette.legend.find((entry) => entry.slot === null)!;
+    expect(bucket.label).not.toBe(OTHER_LABEL);
+    expect(bucket.count).toBe(1); // the one unlabelled entity
+    expect(new Set(palette.legend.map((e) => e.label)).size).toBe(palette.legend.length);
+  });
+
+  it("counts how many labels were folded into the bucket", () => {
+    const labels = Array.from({ length: MAX_COLOURED_LABELS + 4 }, (_, i) => `L${i}`);
+    expect(new LabelPalette(labels).overflowCount).toBe(4);
+    expect(new LabelPalette(["a", "b"]).overflowCount).toBe(0);
+    // Unlabelled entities fill the bucket without being a folded label.
+    expect(new LabelPalette(["a", null, null]).overflowCount).toBe(0);
   });
 
   it("steps each theme separately rather than flipping one", () => {

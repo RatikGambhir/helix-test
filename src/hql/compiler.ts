@@ -474,22 +474,18 @@ function compileGraph(statement: GraphStatement): CompiledQuery {
 
   const nodes = buildSelection({ ...selection, limit: nodeLimit }, { defaultLimit: nodeLimit });
 
-  // An unfiltered whole-graph request can read the edge table directly, which
-  // is much cheaper than fanning out from every node. Anything narrower has to
-  // walk out from the selected nodes so the edges stay related to them.
-  const unfiltered =
-    selection.where === null &&
-    selection.hops.length === 0 &&
-    selection.source.label === null &&
-    selection.skip === null;
-
-  const edgeSelection: AnyTraversal = unfiltered
-    ? edgeLabel
-      ? g().eWithLabel(edgeLabel)
-      : g().e(EdgeRef.all())
-    : buildSelection({ ...selection, limit: nodeLimit }, { defaultLimit: nodeLimit })
-        .bothE(edgeLabel)
-        .dedup();
+  // Edges are always fanned out from the selected nodes. Reading the edge table
+  // directly is cheaper, but the node set is capped independently — by LIMIT or
+  // by DEFAULT_GRAPH_NODE_LIMIT — so on any graph larger than that cap the two
+  // scans return unrelated slices and almost every fetched edge is discarded as
+  // dangling. Fanning out cannot lose a drawable edge: an edge with neither
+  // endpoint in the node set was never drawable to begin with.
+  const edgeSelection: AnyTraversal = buildSelection(
+    { ...selection, limit: nodeLimit },
+    { defaultLimit: nodeLimit },
+  )
+    .bothE(edgeLabel)
+    .dedup();
 
   const batch = readBatch()
     .varAs("nodes", nodes.project(nodeFields))

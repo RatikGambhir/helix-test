@@ -160,6 +160,11 @@ GRAPH [ [FROM] NODES[:<Label>] ]
 restricts which edge label is drawn, and `WITH` fetches node properties so the
 canvas can label nodes by name rather than by type.
 
+Edges are always fetched by walking out from the nodes that were selected, so
+they belong to the part of the graph on screen. On a graph larger than `LIMIT`
+some of them will still lead to nodes that were not fetched; those cannot be
+drawn, and the view reports how many rather than dropping them silently.
+
 ```sql
 GRAPH LIMIT 300
 GRAPH NODES:User VIA Follows WITH name LIMIT 150
@@ -207,7 +212,9 @@ The webview never talks to HelixDB directly. It hands the serialized query to
 the Rust command `run_query`, which posts it to `{url}/v2/query`. That keeps the
 app clear of webview CORS rules, lets an `https`-origin webview reach a
 plain-HTTP local instance, and keeps the API key in the backend's config file
-rather than in webview storage.
+rather than in webview storage. That file is written to the platform config
+directory as `connection.json`, narrowed to `0600` on Unix; the key is stored in
+plain text, so it is protected by file permissions rather than by a keychain.
 
 Entity ids are `i64`, which JavaScript cannot hold exactly in a `number`. The
 Rust side returns the response as text and the frontend parses it with the SDK's

@@ -72,35 +72,46 @@ export interface LegendEntry {
 export class LabelPalette {
   private readonly slots = new Map<string, number>();
   readonly legend: LegendEntry[] = [];
+  private readonly folded: number;
 
   constructor(labels: Iterable<string | null>) {
     const counts = new Map<string, number>();
+    // Entities with no label at all share the neutral bucket, but they are not
+    // a label, so they are counted apart from any real one — including a real
+    // label that happens to be spelled "Other".
+    let unlabelled = 0;
     for (const label of labels) {
-      const key = label ?? OTHER_LABEL;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      if (label === null) unlabelled += 1;
+      else counts.set(label, (counts.get(label) ?? 0) + 1);
     }
 
     const ordered = [...counts.entries()].sort(
       (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
     );
 
-    let overflow = 0;
+    let overflow = unlabelled;
+    let folded = 0;
     for (const [label, count] of ordered) {
-      if (label !== OTHER_LABEL && this.slots.size < MAX_COLOURED_LABELS) {
+      if (this.slots.size < MAX_COLOURED_LABELS) {
         this.slots.set(label, this.slots.size);
         this.legend.push({ label, count, slot: this.slots.get(label)! });
       } else {
         overflow += count;
+        folded += 1;
       }
     }
+    this.folded = folded;
     if (overflow > 0) {
-      this.legend.push({ label: OTHER_LABEL, count: overflow, slot: null });
+      // A real label may already own the name; the bucket has to stay distinct
+      // from it, since the two carry different colours.
+      const name = this.slots.has(OTHER_LABEL) ? `${OTHER_LABEL} labels` : OTHER_LABEL;
+      this.legend.push({ label: name, count: overflow, slot: null });
     }
   }
 
   /** The number of labels that did not get their own hue. */
   get overflowCount(): number {
-    return this.legend.filter((entry) => entry.slot === null).length;
+    return this.folded;
   }
 
   colour(label: string | null, theme: Theme): string {

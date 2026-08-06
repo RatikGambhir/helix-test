@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { HqlError } from "../src/hql/ast";
-import { compile, DEFAULT_ROW_LIMIT } from "../src/hql/compiler";
+import { compile, DEFAULT_GRAPH_EDGE_LIMIT, DEFAULT_ROW_LIMIT } from "../src/hql/compiler";
 import { parse } from "../src/hql/parser";
 
 /** Compiles a statement and returns the wire JSON as a plain object. */
@@ -33,6 +33,19 @@ function stepChain(node: any): string[] {
     current = payload && typeof payload === "object" ? payload.input : undefined;
   }
   return steps;
+}
+
+/** Every `limit` count along the nested `input` chain, outermost first. */
+function limitChain(node: any): number[] {
+  const limits: number[] = [];
+  let current = node;
+  while (current && typeof current === "object") {
+    const key = Object.keys(current)[0];
+    const payload = current[key];
+    if (key === "limit") limits.push(Number(payload.count.literal));
+    current = payload && typeof payload === "object" ? payload.input : undefined;
+  }
+  return limits;
 }
 
 describe("select", () => {
@@ -245,10 +258,28 @@ describe("traversals", () => {
 });
 
 describe("graph", () => {
-  it("reads the edge table directly for an unfiltered whole-graph request", () => {
+  it("walks out from the selected nodes even for an unfiltered whole-graph request", () => {
+    // The node set is capped independently of the edge scan, so reading the
+    // edge table directly would return a slice unrelated to the nodes drawn and
+    // almost every edge would be discarded as dangling.
     const compiled = compile(parse("GRAPH"));
     expect(compiled.shape).toMatchObject({ kind: "graph", nodeVariable: "nodes" });
-    expect(stepChain(root("GRAPH", "edges"))).toEqual(["project", "limit", "edges"]);
+    expect(stepChain(root("GRAPH", "edges"))).toEqual([
+      "project",
+      "limit",
+      "dedup",
+      "both_e",
+      "limit",
+      "dedup",
+      "nodes",
+    ]);
+  });
+
+  it("caps the node scan behind the edge fan-out at the node limit", () => {
+    // Outermost limit is the edge cap, innermost the node cap; swapping them
+    // would silently change how much of the graph is reachable.
+    expect(limitChain(root("GRAPH LIMIT 25", "edges"))).toEqual([DEFAULT_GRAPH_EDGE_LIMIT, 25]);
+    expect(limitChain(root("GRAPH LIMIT 25 EDGE LIMIT 90", "edges"))).toEqual([90, 25]);
   });
 
   it("walks out from the selected nodes once the selection is filtered", () => {

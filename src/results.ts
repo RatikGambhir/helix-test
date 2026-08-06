@@ -222,12 +222,14 @@ function readGraph(body: unknown, shape: Extract<ResultShape, { kind: "graph" }>
   let danglingEdges = 0;
   for (const row of edgeRows) {
     const edge = readGraphEdge(row);
+    // Deduplicate before classifying, so an edge repeated in the response is
+    // reported once rather than inflating the dropped-edge count.
     if (!edge || edgeIds.has(edge.id)) continue;
+    edgeIds.add(edge.id);
     if (!seen.has(edge.source) || !seen.has(edge.target)) {
       danglingEdges++;
       continue;
     }
-    edgeIds.add(edge.id);
     edges.push(edge);
   }
 
@@ -258,7 +260,10 @@ function mergeIdentity(rows: Row[], identity: Row[]): Row[] {
         key === "$id" ? "id" : key === "$label" ? "label" : key === "$from.$id" ? "source" : key === "$to.$id" ? "target" : key;
       merged[alias] = value;
     }
-    return { ...merged, ...row };
+    // Identity wins: a stored property called `id` or `label` must not shadow
+    // the entity's own, which is what the table keys rows by and what clicking
+    // a row sends to DESCRIBE.
+    return { ...row, ...merged };
   });
 }
 

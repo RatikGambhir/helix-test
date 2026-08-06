@@ -56,8 +56,20 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
     lastX: 0,
     lastY: 0,
   });
+  // 0 means "no frame scheduled" — `requestAnimationFrame` never returns 0.
   const frameRef = useRef(0);
   const dirtyRef = useRef(true);
+  const wakeRef = useRef<() => void>(() => {});
+
+  /**
+   * Requests a redraw. The frame loop parks itself once the simulation has
+   * cooled and nothing needs repainting, so anything that changes what is on
+   * screen — or reheats the layout — has to come through here to restart it.
+   */
+  const markDirty = useCallback(() => {
+    dirtyRef.current = true;
+    wakeRef.current();
+  }, []);
 
   const [hoverInfo, setHoverInfo] = useState<{
     x: number;
@@ -84,8 +96,8 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
       x: width / 2 - ((minX + maxX) / 2) * Math.max(MIN_SCALE, scale),
       y: height / 2 - ((minY + maxY) / 2) * Math.max(MIN_SCALE, scale),
     };
-    dirtyRef.current = true;
-  }, [layout]);
+    markDirty();
+  }, [layout, markDirty]);
 
   useEffect(() => {
     fitToView();
@@ -216,9 +228,11 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
   // ---- animation loop -----------------------------------------------------
 
   useEffect(() => {
-    let running = true;
+    let cancelled = false;
+
     const loop = () => {
-      if (!running) return;
+      frameRef.current = 0;
+      if (cancelled) return;
       if (!layout.settled) {
         layout.tick();
         dirtyRef.current = true;
@@ -227,28 +241,42 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
         dirtyRef.current = false;
         draw();
       }
+      // Park once the simulation has cooled and the canvas is up to date;
+      // `markDirty` schedules the next frame. Without this the loop would keep
+      // waking at the display refresh rate for the life of the window.
+      if (layout.settled && !dirtyRef.current) return;
       frameRef.current = requestAnimationFrame(loop);
     };
-    frameRef.current = requestAnimationFrame(loop);
+
+    const wake = () => {
+      if (cancelled || frameRef.current !== 0) return;
+      frameRef.current = requestAnimationFrame(loop);
+    };
+
+    wakeRef.current = wake;
+    wake();
+
     return () => {
-      running = false;
-      cancelAnimationFrame(frameRef.current);
+      cancelled = true;
+      if (frameRef.current !== 0) cancelAnimationFrame(frameRef.current);
+      frameRef.current = 0;
+      wakeRef.current = () => {};
     };
   }, [draw, layout]);
 
   useEffect(() => {
-    dirtyRef.current = true;
-  }, [selectedId, theme]);
+    markDirty();
+  }, [markDirty, selectedId, theme]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      dirtyRef.current = true;
+      markDirty();
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, []);
+  }, [markDirty]);
 
   // ---- pointer interaction ------------------------------------------------
 
@@ -272,7 +300,7 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
       drag.node.x = point.x;
       drag.node.y = point.y;
       layout.reheat(0.3);
-      dirtyRef.current = true;
+      markDirty();
       return;
     }
 
@@ -282,7 +310,7 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
       viewport.y += event.clientY - drag.lastY;
       drag.lastX = event.clientX;
       drag.lastY = event.clientY;
-      dirtyRef.current = true;
+      markDirty();
       return;
     }
 
@@ -292,7 +320,7 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
     const previous = hoverRef.current;
     if (previous.node !== node || previous.edge !== edge) {
       hoverRef.current = { node, edge };
-      dirtyRef.current = true;
+      markDirty();
       setHoverInfo(describeHover(node, edge, event.clientX, event.clientY, containerRef.current));
     } else if (hoverInfo && (node || edge)) {
       setHoverInfo(describeHover(node, edge, event.clientX, event.clientY, containerRef.current));
@@ -316,7 +344,7 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
     }
 
     dragRef.current = { node: null, panning: false, lastX: 0, lastY: 0 };
-    dirtyRef.current = true;
+    markDirty();
   };
 
   const handleDoubleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -338,13 +366,13 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
     viewport.x = px - ((px - viewport.x) / viewport.scale) * next;
     viewport.y = py - ((py - viewport.y) / viewport.scale) * next;
     viewport.scale = next;
-    dirtyRef.current = true;
+    markDirty();
   };
 
   const handlePointerLeave = () => {
     hoverRef.current = { node: null, edge: null };
     setHoverInfo(null);
-    dirtyRef.current = true;
+    markDirty();
   };
 
   const zoomBy = (factor: number) => {
@@ -357,7 +385,7 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
     viewport.x = cx - ((cx - viewport.x) / viewport.scale) * next;
     viewport.y = cy - ((cy - viewport.y) / viewport.scale) * next;
     viewport.scale = next;
-    dirtyRef.current = true;
+    markDirty();
   };
 
   return (
@@ -387,6 +415,7 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
           onClick={() => {
             for (const node of layout.nodes) node.pinned = false;
             layout.reheat(1);
+            markDirty();
           }}
           title="Re-run the layout"
         >
@@ -396,7 +425,7 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
 
       <ul className="graph-legend" aria-label="Node labels">
         {palette.legend.map((entry) => (
-          <li key={entry.label}>
+          <li key={`${entry.slot ?? "other"}-${entry.label}`}>
             <span
               className="swatch"
               style={{ background: palette.colour(entry.slot === null ? null : entry.label, theme) }}

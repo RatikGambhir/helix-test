@@ -173,7 +173,18 @@ fn query_endpoint(base: &str) -> Result<reqwest::Url> {
             reason: format!("unsupported scheme {:?}, expected http or https", url.scheme()),
         });
     }
-    {
+    // Pasting the full endpoint is an easy mistake to make, since that is the
+    // path the docs and error messages name; appending to it again would give
+    // `/v2/query/v2/query` and an opaque 404.
+    let already_endpoint = url
+        .path_segments()
+        .map(|s| {
+            let kept: Vec<&str> = s.filter(|part| !part.is_empty()).collect();
+            kept.ends_with(&QUERY_PATH_SEGMENTS)
+        })
+        .unwrap_or(false);
+
+    if !already_endpoint {
         let mut segments = url.path_segments_mut().map_err(|_| AppError::InvalidUrl {
             url: base.to_string(),
             reason: "the URL cannot have a path".into(),
@@ -182,6 +193,18 @@ fn query_endpoint(base: &str) -> Result<reqwest::Url> {
         segments.pop_if_empty().extend(QUERY_PATH_SEGMENTS);
     }
     Ok(url)
+}
+
+/// Resolves the tri-state `api_key` of a [`ConnectionUpdate`] against the key
+/// already on file: `None` keeps it, `Some("")` clears it, `Some(k)` replaces
+/// it. Shared by `set_connection` and `test_connection` so a probe and the save
+/// that follows it can never disagree about which key is in play.
+fn resolve_api_key(update: Option<String>, stored: Option<String>) -> Option<String> {
+    match update {
+        None => stored.filter(|k| !k.is_empty()),
+        Some(key) if key.is_empty() => None,
+        Some(key) => Some(key),
+    }
 }
 
 fn describe_request_error(err: &reqwest::Error) -> String {
@@ -258,7 +281,11 @@ async fn test_connection(
 ) -> Result<QueryResponse> {
     let conn = Connection {
         url: connection.url,
-        api_key: connection.api_key.filter(|k| !k.is_empty()),
+        // The settings form only sends a key when the user typed one, so a
+        // probe of an otherwise-unchanged connection has to reuse the saved
+        // key — otherwise editing just the URL would fail against any instance
+        // that requires auth, and the key is write-only in the UI.
+        api_key: resolve_api_key(connection.api_key, state.snapshot().api_key),
         timeout_ms: connection.timeout_ms,
         writer_only: connection.writer_only,
     };
@@ -280,12 +307,7 @@ fn set_connection(state: State<'_, AppState>, update: ConnectionUpdate) -> Resul
         guard.url = update.url;
         guard.timeout_ms = update.timeout_ms;
         guard.writer_only = update.writer_only;
-        match update.api_key {
-            // `None` means "leave whatever key is already saved alone".
-            None => {}
-            Some(key) if key.is_empty() => guard.api_key = None,
-            Some(key) => guard.api_key = Some(key),
-        }
+        guard.api_key = resolve_api_key(update.api_key, guard.api_key.take());
         guard.clone()
     };
 
@@ -305,7 +327,23 @@ fn save_connection(state: &AppState, conn: &Connection) -> Result<()> {
         std::fs::create_dir_all(parent).map_err(|e| AppError::Io(e.to_string()))?;
     }
     let json = serde_json::to_string_pretty(conn).map_err(|e| AppError::Io(e.to_string()))?;
-    std::fs::write(&path, json).map_err(|e| AppError::Io(e.to_string()))
+    std::fs::write(&path, json).map_err(|e| AppError::Io(e.to_string()))?;
+    restrict_to_owner(&path)
+}
+
+/// The config file holds the API key in plain text, so on Unix it is narrowed
+/// to `0600` after writing. Best-effort: a filesystem that cannot represent
+/// the mode is not a reason to fail the save.
+#[cfg(unix)]
+fn restrict_to_owner(path: &PathBuf) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &PathBuf) -> Result<()> {
+    Ok(())
 }
 
 fn load_connection(path: &PathBuf) -> Option<Connection> {
@@ -367,6 +405,39 @@ mod tests {
     #[test]
     fn a_scheme_less_host_is_assumed_to_be_http() {
         assert_eq!(endpoint("localhost:6969"), "http://localhost:6969/v2/query");
+    }
+
+    #[test]
+    fn a_pasted_full_endpoint_is_not_doubled_up() {
+        assert_eq!(endpoint("http://localhost:6969/v2/query"), "http://localhost:6969/v2/query");
+        assert_eq!(
+            endpoint("https://gateway.example.com/helix/v2/query/"),
+            "https://gateway.example.com/helix/v2/query/"
+        );
+        // A path that merely contains the segments elsewhere still gets them.
+        assert_eq!(
+            endpoint("https://gateway.example.com/v2/query/helix"),
+            "https://gateway.example.com/v2/query/helix/v2/query"
+        );
+    }
+
+    #[test]
+    fn an_omitted_api_key_keeps_the_saved_one() {
+        // The settings form omits the key unless the user typed one, so a probe
+        // of an unchanged connection has to reuse what is already on file.
+        assert_eq!(
+            resolve_api_key(None, Some("hx_saved".into())),
+            Some("hx_saved".into())
+        );
+        // An explicit empty string is the "remove the saved key" signal.
+        assert_eq!(resolve_api_key(Some(String::new()), Some("hx_saved".into())), None);
+        assert_eq!(
+            resolve_api_key(Some("hx_new".into()), Some("hx_saved".into())),
+            Some("hx_new".into())
+        );
+        assert_eq!(resolve_api_key(None, None), None);
+        // A stored empty string is treated as no key at all.
+        assert_eq!(resolve_api_key(None, Some(String::new())), None);
     }
 
     #[test]
