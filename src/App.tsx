@@ -512,7 +512,7 @@ export function App() {
                 </div>
               </header>
               <div className="graph-stage">
-                {graph ? (
+                {graph && graph.nodes.length > 0 ? (
                   <Suspense fallback={<div className="empty-state"><span className="loading-ring" />Loading graph…</div>}>
                     <GraphCanvas
                       graph={graph}

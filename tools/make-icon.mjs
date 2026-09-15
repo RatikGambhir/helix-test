@@ -1,6 +1,6 @@
 // Generates src-tauri/icons/icon.png without pulling in an image library.
-// The mark is a helix: two counter-rotating strands with rungs between them,
-// drawn on a dark rounded square. Re-run with `node tools/make-icon.mjs`.
+// The mark is a white connected graph on an orange rounded square.
+// Re-run with `node tools/make-icon.mjs`.
 import { deflateSync } from "node:zlib";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -8,10 +8,8 @@ import { dirname } from "node:path";
 const SIZE = 512;
 const SS = 3; // supersampling factor, for cheap antialiasing
 
-const BG = [15, 18, 28];
-const STRAND_A = [110, 231, 183];
-const STRAND_B = [125, 176, 255];
-const RUNG = [148, 163, 184];
+const BG = [255, 104, 54];
+const MARK = [255, 255, 255];
 
 const hi = SIZE * SS;
 const cover = new Float32Array(hi * hi * 3);
@@ -52,8 +50,8 @@ function line(ax, ay, bx, by, width, color) {
 }
 
 // Rounded-square background.
-const pad = 26;
-const radius = 96;
+const pad = 36;
+const radius = 118;
 for (let y = 0; y < hi; y++) {
   for (let x = 0; x < hi; x++) {
     const px = x / SS;
@@ -64,49 +62,24 @@ for (let y = 0; y < hi; y++) {
   }
 }
 
-// Two strands of a double helix plus the rungs joining them.
-const top = 96;
-const bottom = SIZE - 96;
-const midX = SIZE / 2;
-const amplitude = 108;
-const turns = 1.75;
+// Four-node graph from the orange reference artwork.
+const nodes = [
+  [252, 176],
+  [358, 250],
+  [157, 310],
+  [266, 366],
+];
 
-const strandX = (t, phase) => midX + Math.sin(t * turns * Math.PI * 2 + phase) * amplitude;
-const strandY = (t) => top + (bottom - top) * t;
-
-const RUNGS = 11;
-for (let s = 0; s < RUNGS; s++) {
-  const t = (s + 0.5) / RUNGS;
-  const ax = strandX(t, 0);
-  const bx = strandX(t, Math.PI);
-  const y = strandY(t);
-  // Rungs vanish where the strands cross, which is what reads as depth.
-  const separation = Math.abs(ax - bx) / (2 * amplitude);
-  if (separation > 0.35) line(ax, y, bx, y, 8, RUNG);
-}
-
-const SEGMENTS = 160;
-for (const [phase, color] of [
-  [0, STRAND_A],
-  [Math.PI, STRAND_B],
+for (const [from, to] of [
+  [0, 1],
+  [0, 2],
+  [1, 3],
+  [2, 3],
 ]) {
-  for (let s = 0; s < SEGMENTS; s++) {
-    const t0 = s / SEGMENTS;
-    const t1 = (s + 1) / SEGMENTS;
-    line(strandX(t0, phase), strandY(t0), strandX(t1, phase), strandY(t1), 26, color);
-  }
+  line(...nodes[from], ...nodes[to], 32, MARK);
 }
 
-// Nodes at the strand endpoints, echoing the graph view.
-for (const [phase, color] of [
-  [0, STRAND_A],
-  [Math.PI, STRAND_B],
-]) {
-  for (const t of [0, 1]) {
-    disc(strandX(t, phase), strandY(t), 26, color);
-    disc(strandX(t, phase), strandY(t), 12, BG);
-  }
-}
+for (const [x, y] of nodes) disc(x, y, 42, MARK);
 
 /** Box-downsamples the supersampled buffer to `size`, as PNG scanlines. */
 function scanlines(size) {
