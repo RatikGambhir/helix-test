@@ -1,8 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Background,
+  BackgroundVariant,
+  BaseEdge,
+  ControlButton,
+  Controls,
+  EdgeLabelRenderer,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Panel,
+  Position,
+  ReactFlow,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type NodeProps,
+  type ReactFlowInstance,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
+import { Button } from "@/components/ui/button";
 import type { GraphData } from "../results";
-import { ForceLayout, type LayoutEdge, type LayoutNode } from "./layout";
-import { CHROME, LabelPalette, type Theme } from "./palette";
+import { ForceLayout } from "./layout";
+import { LabelPalette, legendColour, type Theme } from "./palette";
 
 export interface GraphSelectionEvent {
   kind: "node" | "edge";
@@ -19,602 +42,391 @@ interface Props {
   onExpand: (nodeId: string) => void;
 }
 
-interface Viewport {
-  scale: number;
-  x: number;
-  y: number;
-}
+type EntityNodeData = {
+  label: string | null;
+  caption: string;
+  degree: number;
+  properties: Record<string, unknown>;
+  colour: string;
+};
 
-/** Nodes above this count stop drawing labels except on hover/selection. */
-const LABEL_BUDGET = 60;
-const MIN_SCALE = 0.05;
-const MAX_SCALE = 8;
+type RelationshipEdgeData = {
+  label: string | null;
+  parallelIndex: number;
+  parallelCount: number;
+  loop: boolean;
+};
+
+type EntityNode = Node<EntityNodeData, "entity">;
+type RelationshipEdge = Edge<RelationshipEdgeData, "relationship">;
+
+const NODE_TYPES = { entity: EntityNodeCard };
+const EDGE_TYPES = { relationship: RelationshipEdgePath };
+const NODE_ORIGIN: [number, number] = [0.5, 0.5];
+const CARD_WIDTH = 164;
+const CARD_HEIGHT = 52;
+const CARD_GAP = 18;
 
 export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const layout = useMemo(() => {
-    const next = new ForceLayout(graph);
-    next.warmUp();
-    return next;
-  }, [graph]);
-
   const palette = useMemo(
     () => new LabelPalette(graph.nodes.map((node) => node.label)),
     [graph],
   );
+  const initial = useMemo(() => buildFlowElements(graph), [graph]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<EntityNode>(initial.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<RelationshipEdge>(initial.edges);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
+  const flowRef = useRef<ReactFlowInstance<EntityNode, RelationshipEdge> | null>(null);
 
-  const viewportRef = useRef<Viewport>({ scale: 1, x: 0, y: 0 });
-  const hoverRef = useRef<{ node: LayoutNode | null; edge: LayoutEdge | null }>({
-    node: null,
-    edge: null,
-  });
-  const dragRef = useRef<{ node: LayoutNode | null; panning: boolean; lastX: number; lastY: number }>({
-    node: null,
-    panning: false,
-    lastX: 0,
-    lastY: 0,
-  });
-  // 0 means "no frame scheduled" — `requestAnimationFrame` never returns 0.
-  const frameRef = useRef(0);
-  const dirtyRef = useRef(true);
-  const wakeRef = useRef<() => void>(() => {});
-
-  /**
-   * Requests a redraw. The frame loop parks itself once the simulation has
-   * cooled and nothing needs repainting, so anything that changes what is on
-   * screen — or reheats the layout — has to come through here to restart it.
-   */
-  const markDirty = useCallback(() => {
-    dirtyRef.current = true;
-    wakeRef.current();
-  }, []);
-
-  const [hoverInfo, setHoverInfo] = useState<{
-    x: number;
-    y: number;
-    title: string;
-    lines: string[];
-  } | null>(null);
-
-  /** Scales and centres the layout so the whole graph is visible. */
-  const fitToView = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || layout.nodes.length === 0) return;
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    const { minX, minY, maxX, maxY } = layout.bounds();
-    const padding = 48;
-    const scale = Math.min(
-      (width - padding * 2) / Math.max(maxX - minX, 1),
-      (height - padding * 2) / Math.max(maxY - minY, 1),
-      2.5,
-    );
-    viewportRef.current = {
-      scale: Math.max(MIN_SCALE, scale),
-      x: width / 2 - ((minX + maxX) / 2) * Math.max(MIN_SCALE, scale),
-      y: height / 2 - ((minY + maxY) / 2) * Math.max(MIN_SCALE, scale),
-    };
-    markDirty();
-  }, [layout, markDirty]);
+  const adjacency = useMemo(() => {
+    const next = new Map<string, Set<string>>();
+    for (const edge of graph.edges) {
+      if (!next.has(edge.source)) next.set(edge.source, new Set());
+      if (!next.has(edge.target)) next.set(edge.target, new Set());
+      next.get(edge.source)!.add(edge.target);
+      next.get(edge.target)!.add(edge.source);
+    }
+    return next;
+  }, [graph.edges]);
 
   useEffect(() => {
-    fitToView();
-  }, [fitToView]);
-
-  const toGraphSpace = useCallback((clientX: number, clientY: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const { scale, x, y } = viewportRef.current;
-    return {
-      x: (clientX - rect.left - x) / scale,
-      y: (clientY - rect.top - y) / scale,
-    };
-  }, []);
-
-  // ---- rendering ----------------------------------------------------------
-
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
-    if (!canvas || !context) return;
-
-    const ratio = window.devicePixelRatio || 1;
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    if (canvas.width !== width * ratio || canvas.height !== height * ratio) {
-      canvas.width = width * ratio;
-      canvas.height = height * ratio;
-    }
-
-    const chrome = CHROME[theme];
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    context.clearRect(0, 0, width, height);
-    context.fillStyle = chrome.surface;
-    context.fillRect(0, 0, width, height);
-
-    const { scale, x: panX, y: panY } = viewportRef.current;
-    context.translate(panX, panY);
-    context.scale(scale, scale);
-
-    const hovered = hoverRef.current;
-    const selectedNode = selectedId ? layout.byId.get(selectedId) ?? null : null;
-    const focus = hovered.node ?? selectedNode;
-    // Everything one hop from the focused node stays fully opaque; the rest of
-    // the graph dims, which is what makes a neighbourhood readable in a hairball.
-    const related = new Set<string>();
-    if (focus) {
-      related.add(focus.id);
-      for (const edge of layout.edges) {
-        if (edge.source === focus) related.add(edge.target.id);
-        if (edge.target === focus) related.add(edge.source.id);
-      }
-    }
-
-    // --- edges
-    context.lineCap = "round";
-    for (const edge of layout.edges) {
-      const incident = focus ? edge.source === focus || edge.target === focus : false;
-      const dimmed = focus !== null && !incident;
-      const isHovered = hovered.edge === edge;
-      const isSelected = selectedId === edge.id;
-
-      context.globalAlpha = dimmed ? 0.12 : isHovered || isSelected ? 1 : 0.55;
-      context.strokeStyle = isHovered || isSelected ? chrome.edgeStrong : chrome.edge;
-      context.lineWidth = (isHovered || isSelected ? 2.6 : 1.4) / scale;
-      drawEdgePath(context, edge);
-      context.stroke();
-
-      if (!dimmed && scale > 0.45) {
-        drawArrowhead(context, edge, scale, context.strokeStyle);
-      }
-    }
-
-    // --- nodes
-    context.globalAlpha = 1;
-    for (const node of layout.nodes) {
-      const dimmed = focus !== null && !related.has(node.id);
-      const isSelected = node.id === selectedId;
-      const isHovered = hovered.node === node;
-
-      context.globalAlpha = dimmed ? 0.18 : 1;
-      context.beginPath();
-      context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-      context.fillStyle = palette.colour(node.label, theme);
-      context.fill();
-
-      // A surface-coloured ring keeps overlapping nodes readable as separate
-      // marks instead of merging into one blob.
-      context.lineWidth = 2 / scale;
-      context.strokeStyle = chrome.surface;
-      context.stroke();
-
-      if (isSelected || isHovered) {
-        context.beginPath();
-        context.arc(node.x, node.y, node.radius + 4 / scale, 0, Math.PI * 2);
-        context.lineWidth = 2 / scale;
-        context.strokeStyle = chrome.ink;
-        context.stroke();
-      }
-    }
-
-    // --- direct labels
-    // Colour alone never has to carry identity: the busiest nodes, plus
-    // whatever is hovered or selected, are always named on the canvas.
-    context.globalAlpha = 1;
-    const fontSize = 12 / scale;
-    context.font = `${fontSize}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-
-    const labelled = pickLabelled(layout.nodes, focus, related, scale);
-    for (const node of labelled) {
-      const text = nodeCaption(node);
-      if (!text) continue;
-      const y = node.y + node.radius + fontSize * 0.9;
-      // Halo the text so it stays legible where it crosses an edge.
-      context.lineWidth = 3 / scale;
-      context.strokeStyle = chrome.surface;
-      context.strokeText(text, node.x, y);
-      context.fillStyle = node === focus ? chrome.ink : chrome.secondaryInk;
-      context.fillText(text, node.x, y);
-    }
-
-    context.setTransform(1, 0, 0, 1, 0, 0);
-  }, [layout, palette, selectedId, theme]);
-
-  // ---- animation loop -----------------------------------------------------
+    setNodes(initial.nodes);
+    setEdges(initial.edges);
+    setHoveredNodeId(null);
+    requestAnimationFrame(() => flowRef.current?.fitView({ padding: 0.2, duration: 300 }));
+  }, [initial, setEdges, setNodes]);
 
   useEffect(() => {
-    let cancelled = false;
+    setNodes((current) => current.map((node) => ({ ...node, selected: node.id === selectedId })));
+    setEdges((current) => current.map((edge) => ({ ...edge, selected: edge.id === selectedId })));
+  }, [selectedId, setEdges, setNodes]);
 
-    const loop = () => {
-      frameRef.current = 0;
-      if (cancelled) return;
-      if (!layout.settled) {
-        layout.tick();
-        dirtyRef.current = true;
-      }
-      if (dirtyRef.current) {
-        dirtyRef.current = false;
-        draw();
-      }
-      // Park once the simulation has cooled and the canvas is up to date;
-      // `markDirty` schedules the next frame. Without this the loop would keep
-      // waking at the display refresh rate for the life of the window.
-      if (layout.settled && !dirtyRef.current) return;
-      frameRef.current = requestAnimationFrame(loop);
-    };
+  const focusId = hoveredNodeId ?? (nodes.some((node) => node.id === selectedId) ? selectedId : null);
+  const visibleNodeIds = useMemo(() => {
+    if (!focusId) return null;
+    return new Set([focusId, ...(adjacency.get(focusId) ?? [])]);
+  }, [adjacency, focusId]);
 
-    const wake = () => {
-      if (cancelled || frameRef.current !== 0) return;
-      frameRef.current = requestAnimationFrame(loop);
-    };
+  const displayNodes = useMemo(
+    () => nodes.map((node) => {
+      const colour = palette.colour(node.data.label, theme);
+      const labelMuted = hoveredLabel !== null && node.data.label !== hoveredLabel;
+      const neighbourhoodMuted = visibleNodeIds !== null && !visibleNodeIds.has(node.id);
+      return {
+        ...node,
+        className: labelMuted || neighbourhoodMuted ? "is-dimmed" : undefined,
+        data: { ...node.data, colour },
+      };
+    }),
+    [hoveredLabel, nodes, palette, theme, visibleNodeIds],
+  );
 
-    wakeRef.current = wake;
-    wake();
+  const displayEdges = useMemo(
+    () => edges.map((edge) => {
+      const sourceLabel = nodes.find((node) => node.id === edge.source)?.data.label;
+      const targetLabel = nodes.find((node) => node.id === edge.target)?.data.label;
+      const labelMuted = hoveredLabel !== null && sourceLabel !== hoveredLabel && targetLabel !== hoveredLabel;
+      const neighbourhoodMuted = focusId !== null && edge.source !== focusId && edge.target !== focusId;
+      return {
+        ...edge,
+        className: labelMuted || neighbourhoodMuted ? "is-dimmed" : undefined,
+      };
+    }),
+    [edges, focusId, hoveredLabel, nodes],
+  );
 
-    return () => {
-      cancelled = true;
-      if (frameRef.current !== 0) cancelAnimationFrame(frameRef.current);
-      frameRef.current = 0;
-      wakeRef.current = () => {};
-    };
-  }, [draw, layout]);
-
-  useEffect(() => {
-    markDirty();
-  }, [markDirty, selectedId, theme]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      markDirty();
-    });
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [markDirty]);
-
-  // ---- pointer interaction ------------------------------------------------
-
-  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    (event.target as Element).setPointerCapture(event.pointerId);
-    const point = toGraphSpace(event.clientX, event.clientY);
-    const node = layout.nodeAt(point.x, point.y);
-    if (node) {
-      node.pinned = true;
-      dragRef.current = { node, panning: false, lastX: event.clientX, lastY: event.clientY };
-    } else {
-      dragRef.current = { node: null, panning: true, lastX: event.clientX, lastY: event.clientY };
-    }
-  };
-
-  const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const drag = dragRef.current;
-
-    if (drag.node) {
-      const point = toGraphSpace(event.clientX, event.clientY);
-      drag.node.x = point.x;
-      drag.node.y = point.y;
-      layout.reheat(0.3);
-      markDirty();
-      return;
-    }
-
-    if (drag.panning) {
-      const viewport = viewportRef.current;
-      viewport.x += event.clientX - drag.lastX;
-      viewport.y += event.clientY - drag.lastY;
-      drag.lastX = event.clientX;
-      drag.lastY = event.clientY;
-      markDirty();
-      return;
-    }
-
-    const point = toGraphSpace(event.clientX, event.clientY);
-    const node = layout.nodeAt(point.x, point.y);
-    const edge = node ? null : edgeAt(layout, point.x, point.y, 6 / viewportRef.current.scale);
-    const previous = hoverRef.current;
-    if (previous.node !== node || previous.edge !== edge) {
-      hoverRef.current = { node, edge };
-      markDirty();
-      setHoverInfo(describeHover(node, edge, event.clientX, event.clientY, containerRef.current));
-    } else if (hoverInfo && (node || edge)) {
-      setHoverInfo(describeHover(node, edge, event.clientX, event.clientY, containerRef.current));
-    }
-  };
-
-  const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const drag = dragRef.current;
-    const moved =
-      Math.abs(event.clientX - drag.lastX) > 3 || Math.abs(event.clientY - drag.lastY) > 3;
-
-    if (drag.node) {
-      // Releasing without a real drag is a click, so unpin and select instead.
-      drag.node.pinned = false;
-      if (!moved) onSelect({ kind: "node", id: drag.node.id, label: drag.node.label });
-      layout.reheat(0.25);
-    } else if (drag.panning && !moved) {
-      const point = toGraphSpace(event.clientX, event.clientY);
-      const edge = edgeAt(layout, point.x, point.y, 6 / viewportRef.current.scale);
-      onSelect(edge ? { kind: "edge", id: edge.id, label: edge.label } : null);
-    }
-
-    dragRef.current = { node: null, panning: false, lastX: 0, lastY: 0 };
-    markDirty();
-  };
-
-  const handleDoubleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    const point = toGraphSpace(event.clientX, event.clientY);
-    const node = layout.nodeAt(point.x, point.y);
-    if (node) onExpand(node.id);
-  };
-
-  const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const viewport = viewportRef.current;
-    const factor = Math.exp(-event.deltaY * 0.0015);
-    const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, viewport.scale * factor));
-    // Zoom about the cursor rather than the canvas centre.
-    const px = event.clientX - rect.left;
-    const py = event.clientY - rect.top;
-    viewport.x = px - ((px - viewport.x) / viewport.scale) * next;
-    viewport.y = py - ((py - viewport.y) / viewport.scale) * next;
-    viewport.scale = next;
-    markDirty();
-  };
-
-  const handlePointerLeave = () => {
-    hoverRef.current = { node: null, edge: null };
-    setHoverInfo(null);
-    markDirty();
-  };
-
-  const zoomBy = (factor: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const viewport = viewportRef.current;
-    const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, viewport.scale * factor));
-    const cx = canvas.clientWidth / 2;
-    const cy = canvas.clientHeight / 2;
-    viewport.x = cx - ((cx - viewport.x) / viewport.scale) * next;
-    viewport.y = cy - ((cy - viewport.y) / viewport.scale) * next;
-    viewport.scale = next;
-    markDirty();
-  };
+  const restoreLayout = useCallback(() => {
+    const next = buildFlowElements(graph);
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    requestAnimationFrame(() => flowRef.current?.fitView({ padding: 0.2, duration: 300 }));
+  }, [graph, setEdges, setNodes]);
 
   return (
-    <div className="graph-canvas" ref={containerRef}>
-      <canvas
-        ref={canvasRef}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerLeave}
-        onDoubleClick={handleDoubleClick}
-        onWheel={handleWheel}
-      />
-
-      <div className="graph-controls">
-        <button type="button" onClick={() => zoomBy(1.3)} title="Zoom in" aria-label="Zoom in">
-          +
-        </button>
-        <button type="button" onClick={() => zoomBy(1 / 1.3)} title="Zoom out" aria-label="Zoom out">
-          −
-        </button>
-        <button type="button" onClick={fitToView} title="Fit to view">
-          Fit
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            for (const node of layout.nodes) node.pinned = false;
-            layout.reheat(1);
-            markDirty();
-          }}
-          title="Re-run the layout"
-        >
-          Relayout
-        </button>
-      </div>
-
-      <ul className="graph-legend" aria-label="Node labels">
-        {palette.legend.map((entry) => (
-          <li key={`${entry.slot ?? "other"}-${entry.label}`}>
-            <span
-              className="swatch"
-              style={{ background: palette.colour(entry.slot === null ? null : entry.label, theme) }}
-              aria-hidden="true"
-            />
-            <span className="legend-label">{entry.label}</span>
-            <span className="legend-count">{entry.count.toLocaleString()}</span>
-          </li>
-        ))}
-      </ul>
-
-      {hoverInfo && (
-        <div className="graph-tooltip" style={{ left: hoverInfo.x, top: hoverInfo.y }} role="tooltip">
-          <strong>{hoverInfo.title}</strong>
-          {hoverInfo.lines.map((line) => (
-            <span key={line}>{line}</span>
-          ))}
-        </div>
-      )}
+    <div className="graph-canvas">
+      <ReactFlow<EntityNode, RelationshipEdge>
+        nodes={displayNodes}
+        edges={displayEdges}
+        nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
+        nodeOrigin={NODE_ORIGIN}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onInit={(instance) => { flowRef.current = instance; }}
+        onNodeClick={(_event, node) => onSelect({ kind: "node", id: node.id, label: node.data.label })}
+        onNodeDoubleClick={(_event, node) => onExpand(node.id)}
+        onNodeMouseEnter={(_event, node) => setHoveredNodeId(node.id)}
+        onNodeMouseLeave={() => setHoveredNodeId(null)}
+        onEdgeClick={(_event, edge) => onSelect({ kind: "edge", id: edge.id, label: edge.data?.label ?? null })}
+        onPaneClick={() => onSelect(null)}
+        nodesDraggable
+        nodesConnectable={false}
+        edgesReconnectable={false}
+        elementsSelectable
+        panOnDrag={[0, 1]}
+        minZoom={0.08}
+        maxZoom={3.5}
+        fitView
+        fitViewOptions={{ padding: 0.2, maxZoom: 1.35 }}
+        colorMode={theme}
+        deleteKeyCode={null}
+        multiSelectionKeyCode="Shift"
+        aria-label="Interactive graph visualization"
+      >
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} />
+        <Controls position="top-right" showInteractive={false}>
+          <ControlButton onClick={restoreLayout} title="Reset node layout" aria-label="Reset node layout">
+            <ResetIcon />
+          </ControlButton>
+        </Controls>
+        {graph.nodes.length <= 500 ? (
+          <MiniMap
+            position="bottom-right"
+            pannable
+            zoomable
+            nodeColor={(node) => (node.data as EntityNodeData).colour}
+            nodeStrokeWidth={2}
+            ariaLabel="Graph minimap"
+          />
+        ) : null}
+        <Panel position="bottom-left" className="graph-legend-panel">
+          <div className="graph-legend-heading">
+            <span>Node labels</span>
+            <span>{graph.nodes.length.toLocaleString()} total</span>
+          </div>
+          <ul className="graph-legend" aria-label="Node labels">
+            {palette.legend.map((entry) => (
+              <li key={`${entry.slot ?? "other"}-${entry.label}`}>
+                <Button
+                  variant="ghost"
+                  onMouseEnter={() => setHoveredLabel(entry.slot === null ? null : entry.label)}
+                  onMouseLeave={() => setHoveredLabel(null)}
+                  onFocus={() => setHoveredLabel(entry.slot === null ? null : entry.label)}
+                  onBlur={() => setHoveredLabel(null)}
+                >
+                  <span className="swatch" style={{ background: legendColour(entry, theme) }} aria-hidden="true" />
+                  <span className="legend-label">{entry.label}</span>
+                  <span className="legend-count">{entry.count.toLocaleString()}</span>
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+        <Panel position="top-left" className="graph-help">
+          Drag nodes · scroll to zoom · drag canvas to pan · shift-drag to select
+        </Panel>
+      </ReactFlow>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Drawing helpers
-// ---------------------------------------------------------------------------
+function EntityNodeCard({ data, selected }: NodeProps<EntityNode>) {
+  const propertyCount = Object.keys(data.properties).length;
+  const description = [
+    data.label ?? "Unlabelled node",
+    data.caption,
+    `${data.degree} relationship${data.degree === 1 ? "" : "s"}`,
+    `${propertyCount} propert${propertyCount === 1 ? "y" : "ies"}`,
+  ].join(" · ");
 
-/** Quadratic control point that bows parallel edges apart from each other. */
-function edgeCurvature(edge: LayoutEdge): number {
-  if (edge.parallelCount <= 1) return 0;
-  // Spread indices symmetrically around zero: 0, +1, -1, +2, -2 …
-  const centred = edge.parallelIndex - (edge.parallelCount - 1) / 2;
-  return centred * 22;
-}
-
-function drawEdgePath(context: CanvasRenderingContext2D, edge: LayoutEdge): void {
-  context.beginPath();
-  if (edge.loop) {
-    // Self-edges are drawn as a small circle sitting above the node.
-    const r = edge.source.radius + 9 + edge.parallelIndex * 6;
-    context.arc(edge.source.x, edge.source.y - r * 0.8, r, 0, Math.PI * 2);
-    return;
-  }
-
-  const curvature = edgeCurvature(edge);
-  context.moveTo(edge.source.x, edge.source.y);
-  if (curvature === 0) {
-    context.lineTo(edge.target.x, edge.target.y);
-    return;
-  }
-  const mx = (edge.source.x + edge.target.x) / 2;
-  const my = (edge.source.y + edge.target.y) / 2;
-  const dx = edge.target.x - edge.source.x;
-  const dy = edge.target.y - edge.source.y;
-  const length = Math.hypot(dx, dy) || 1;
-  context.quadraticCurveTo(
-    mx - (dy / length) * curvature,
-    my + (dx / length) * curvature,
-    edge.target.x,
-    edge.target.y,
+  return (
+    <div
+      className={`entity-node${selected ? " is-selected" : ""}`}
+      style={{ "--node-colour": data.colour } as React.CSSProperties}
+      title={description}
+    >
+      <span className="entity-node-accent" aria-hidden="true" />
+      <div className="entity-node-copy">
+        <span className="entity-node-caption">{data.caption}</span>
+        <span className="entity-node-meta">
+          {data.label ?? "Unlabelled"} <span aria-hidden="true">·</span> {data.degree}
+        </span>
+      </div>
+      <span className="entity-node-port" aria-hidden="true" />
+      {([Position.Top, Position.Right, Position.Bottom, Position.Left] as const).flatMap((position) => {
+        const side = position.toLowerCase();
+        return [
+          <Handle key={`source-${side}`} type="source" position={position} id={`source-${side}`} isConnectable={false} />,
+          <Handle key={`target-${side}`} type="target" position={position} id={`target-${side}`} isConnectable={false} />,
+        ];
+      })}
+    </div>
   );
 }
 
-/** Direction is part of the data, so every edge gets an arrowhead. */
-function drawArrowhead(
-  context: CanvasRenderingContext2D,
-  edge: LayoutEdge,
-  scale: number,
-  colour: string | CanvasGradient | CanvasPattern,
-): void {
-  if (edge.loop) return;
-  const dx = edge.target.x - edge.source.x;
-  const dy = edge.target.y - edge.source.y;
-  const length = Math.hypot(dx, dy);
-  if (length < 1) return;
+function RelationshipEdgePath({
+  id,
+  source,
+  target,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  markerEnd,
+  selected,
+  data,
+  style,
+}: EdgeProps<RelationshipEdge>) {
+  const parallelIndex = data?.parallelIndex ?? 0;
+  const parallelCount = data?.parallelCount ?? 1;
+  const centred = parallelIndex - (parallelCount - 1) / 2;
+  const offset = centred * 28;
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  const length = Math.hypot(dx, dy) || 1;
+  const middleX = (sourceX + targetX) / 2 - (dy / length) * offset;
+  const middleY = (sourceY + targetY) / 2 + (dx / length) * offset;
+  const isLoop = data?.loop || source === target;
+  const path = isLoop
+    ? `M ${sourceX} ${sourceY} C ${sourceX + 84} ${sourceY - 92}, ${targetX - 84} ${targetY - 92}, ${targetX} ${targetY}`
+    : `M ${sourceX} ${sourceY} Q ${middleX} ${middleY} ${targetX} ${targetY}`;
+  const labelX = isLoop ? (sourceX + targetX) / 2 : (sourceX + 2 * middleX + targetX) / 4;
+  const labelY = isLoop ? Math.min(sourceY, targetY) - 70 : (sourceY + 2 * middleY + targetY) / 4;
 
-  const ux = dx / length;
-  const uy = dy / length;
-  // Sit the head on the rim of the target node, not at its centre.
-  const tipX = edge.target.x - ux * (edge.target.radius + 1.5 / scale);
-  const tipY = edge.target.y - uy * (edge.target.radius + 1.5 / scale);
-  const size = 7 / scale;
-
-  context.beginPath();
-  context.moveTo(tipX, tipY);
-  context.lineTo(tipX - ux * size + uy * size * 0.45, tipY - uy * size - ux * size * 0.45);
-  context.lineTo(tipX - ux * size - uy * size * 0.45, tipY - uy * size + ux * size * 0.45);
-  context.closePath();
-  context.fillStyle = colour;
-  context.fill();
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={path}
+        markerEnd={markerEnd}
+        interactionWidth={18}
+        style={style}
+        className={selected ? "is-selected" : undefined}
+      />
+      {selected && data?.label ? (
+        <EdgeLabelRenderer>
+          <div className="edge-label nodrag nopan" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>
+            {data.label}
+          </div>
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
+  );
 }
 
-/** Picks which nodes get a permanent caption, within a readability budget. */
-function pickLabelled(
-  nodes: LayoutNode[],
-  focus: LayoutNode | null,
-  related: Set<string>,
-  scale: number,
-): LayoutNode[] {
-  if (focus) {
-    // Zoomed into a neighbourhood: name the focus and everything around it.
-    return nodes.filter((node) => related.has(node.id)).slice(0, LABEL_BUDGET * 2);
+function buildFlowElements(graph: GraphData): { nodes: EntityNode[]; edges: RelationshipEdge[] } {
+  const layout = new ForceLayout(graph);
+  layout.warmUp(150);
+  spreadCardNodes(layout.nodes);
+
+  const nodes: EntityNode[] = layout.nodes.map((node) => ({
+    id: node.id,
+    type: "entity",
+    position: { x: node.x, y: node.y },
+    data: {
+      label: node.label,
+      caption: nodeCaption(node.properties, node.label, node.id),
+      degree: node.degree,
+      properties: node.properties,
+      colour: "currentColor",
+    },
+    ariaLabel: `${node.label ?? "Unlabelled node"}: ${nodeCaption(node.properties, node.label, node.id)}`,
+  }));
+
+  const positions = new Map(layout.nodes.map((node) => [node.id, node]));
+  const edges: RelationshipEdge[] = layout.edges.map((edge) => {
+    const source = positions.get(edge.source.id)!;
+    const target = positions.get(edge.target.id)!;
+    const handles = edge.loop
+      ? { sourceHandle: "source-right", targetHandle: "target-top" }
+      : handlesFor(source.x, source.y, target.x, target.y);
+    return {
+      id: edge.id,
+      type: "relationship",
+      source: edge.source.id,
+      target: edge.target.id,
+      ...handles,
+      data: {
+        label: edge.label,
+        parallelIndex: edge.parallelIndex,
+        parallelCount: edge.parallelCount,
+        loop: edge.loop,
+      },
+      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
+      ariaLabel: `${edge.label ?? "Relationship"}: ${edge.source.id} to ${edge.target.id}`,
+    };
+  });
+
+  return { nodes, edges };
+}
+
+/**
+ * The force engine was originally tuned for circular canvas marks. React Flow
+ * renders information-rich cards, so resolve their rectangular bounds before
+ * handing the positions over. This keeps the topology organic without leaving
+ * labels stacked on top of each other.
+ */
+function spreadCardNodes(nodes: Array<{ id: string; x: number; y: number }>): void {
+  for (const node of nodes) {
+    node.x *= 1.35;
+    node.y *= 1.15;
   }
-  if (nodes.length <= LABEL_BUDGET || scale > 1.4) return nodes;
-  // Too many to name them all — the highest-degree nodes carry the map.
-  return [...nodes].sort((a, b) => b.degree - a.degree).slice(0, LABEL_BUDGET);
+
+  const minimumX = CARD_WIDTH + CARD_GAP;
+  const minimumY = CARD_HEIGHT + CARD_GAP;
+  const passes = nodes.length > 800 ? 8 : 22;
+
+  for (let pass = 0; pass < passes; pass++) {
+    let moved = false;
+    for (let index = 0; index < nodes.length; index++) {
+      const node = nodes[index];
+      for (let otherIndex = index + 1; otherIndex < nodes.length; otherIndex++) {
+        const other = nodes[otherIndex];
+        const dx = other.x - node.x;
+        const dy = other.y - node.y;
+        const overlapX = minimumX - Math.abs(dx);
+        const overlapY = minimumY - Math.abs(dy);
+        if (overlapX <= 0 || overlapY <= 0) continue;
+
+        moved = true;
+        if (overlapX < overlapY) {
+          const direction = dx === 0 ? (node.id < other.id ? 1 : -1) : Math.sign(dx);
+          const shift = overlapX / 2 + 0.5;
+          node.x -= direction * shift;
+          other.x += direction * shift;
+        } else {
+          const direction = dy === 0 ? (node.id < other.id ? 1 : -1) : Math.sign(dy);
+          const shift = overlapY / 2 + 0.5;
+          node.y -= direction * shift;
+          other.y += direction * shift;
+        }
+      }
+    }
+    if (!moved) break;
+  }
 }
 
-/** The most human-readable name a node has: a name-ish property, else its label. */
-function nodeCaption(node: LayoutNode): string {
-  for (const key of ["name", "title", "label", "username", "email", "id"]) {
-    const value = node.properties[key];
-    if (typeof value === "string" && value.length > 0) return truncate(value, 24);
+function handlesFor(sourceX: number, sourceY: number, targetX: number, targetY: number) {
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { sourceHandle: "source-right", targetHandle: "target-left" }
+      : { sourceHandle: "source-left", targetHandle: "target-right" };
+  }
+  return dy >= 0
+    ? { sourceHandle: "source-bottom", targetHandle: "target-top" }
+    : { sourceHandle: "source-top", targetHandle: "target-bottom" };
+}
+
+function nodeCaption(properties: Record<string, unknown>, label: string | null, id: string): string {
+  for (const key of ["name", "title", "label", "username", "email"]) {
+    const value = properties[key];
+    if (typeof value === "string" && value.length > 0) return truncate(value, 28);
     if (typeof value === "number" || typeof value === "bigint") return String(value);
   }
-  return node.label ?? "";
+  return label ? `${label} ${truncate(id, 16)}` : truncate(id, 22);
 }
 
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
 
-/** Distance from a point to an edge, used for hit-testing. */
-function edgeAt(
-  layout: ForceLayout,
-  x: number,
-  y: number,
-  tolerance: number,
-): LayoutEdge | null {
-  let best: LayoutEdge | null = null;
-  let bestDistance = tolerance;
-  for (const edge of layout.edges) {
-    if (edge.loop) continue;
-    const distance = distanceToSegment(x, y, edge.source.x, edge.source.y, edge.target.x, edge.target.y);
-    if (distance < bestDistance) {
-      best = edge;
-      bestDistance = distance;
-    }
-  }
-  return best;
-}
-
-function distanceToSegment(
-  px: number,
-  py: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-): number {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const lengthSquared = dx * dx + dy * dy;
-  if (lengthSquared === 0) return Math.hypot(px - ax, py - ay);
-  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared));
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
-}
-
-function describeHover(
-  node: LayoutNode | null,
-  edge: LayoutEdge | null,
-  clientX: number,
-  clientY: number,
-  container: HTMLElement | null,
-): { x: number; y: number; title: string; lines: string[] } | null {
-  if (!node && !edge) return null;
-  const rect = container?.getBoundingClientRect();
-  const x = clientX - (rect?.left ?? 0) + 14;
-  const y = clientY - (rect?.top ?? 0) + 14;
-
-  if (node) {
-    const lines = [`id ${node.id}`, `${node.degree} edge${node.degree === 1 ? "" : "s"}`];
-    for (const [key, value] of Object.entries(node.properties).slice(0, 6)) {
-      lines.push(`${key}: ${truncate(formatValue(value), 40)}`);
-    }
-    return { x, y, title: node.label ?? "(no label)", lines };
-  }
-
-  return {
-    x,
-    y,
-    title: edge!.label ?? "(no label)",
-    lines: [`id ${edge!.id}`, `${edge!.source.id} → ${edge!.target.id}`],
-  };
-}
-
-function formatValue(value: unknown): string {
-  if (typeof value === "bigint") return value.toString();
-  if (value === null || value === undefined) return "";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+function ResetIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4.8 7.7A8 8 0 1 1 4 14M4.8 7.7V3.5m0 4.2H9" />
+    </svg>
+  );
 }

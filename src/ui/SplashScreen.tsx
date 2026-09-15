@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import "./SplashScreen.css";
 
 type SplashTokenKind =
@@ -216,24 +218,19 @@ export function SplashScreen({ onComplete, minDuration = 2_000 }: Props) {
         </div>
 
         <div className="splash-progress-region splash-reveal splash-reveal-progress">
-          <div
+          <Progress
             className="splash-progress-track"
-            role="progressbar"
             aria-label="Preparing Helix Visualizer"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(progress)}
-          >
-            <span style={{ width: `${progress}%` }} />
-          </div>
+            value={Math.round(progress)}
+          />
 
           {ready ? (
-            <button ref={continueButton} type="button" className="splash-enter" onClick={exit}>
+            <Button ref={continueButton} variant="default" className="splash-enter" onClick={exit}>
               Continue
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M5 12h14m-6-6 6 6-6 6" />
               </svg>
-            </button>
+            </Button>
           ) : (
             <div className="splash-status" role="status">
               <span aria-hidden="true" />

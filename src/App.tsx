@@ -1,5 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getConnection,
   isDesktop,
@@ -429,23 +431,23 @@ export function App() {
                 error={compileState.error}
               />
 
-              <section className="output">
-                <nav className="tabs" role="tablist">
-                  <TabButton id="results" active={outputTab} onSelect={setOutputTab}>
+              <Tabs className="output" value={outputTab} onValueChange={(value) => setOutputTab(value as OutputTab)}>
+                <TabsList className="tabs">
+                  <TabsTrigger value="results" className="tab">
                     Results
-                  </TabButton>
-                  <TabButton id="wire" active={outputTab} onSelect={setOutputTab} disabled={!compileState.compiled}>
+                  </TabsTrigger>
+                  <TabsTrigger value="wire" className="tab" disabled={!compileState.compiled}>
                     Wire format
-                  </TabButton>
+                  </TabsTrigger>
 
                   <span className="tab-status">
                     {run.running && "running…"}
                     {!run.running && run.durationMs !== null && `${run.durationMs} ms`}
                     {!run.running && run.compiled && ` · ${run.compiled.summary}`}
                   </span>
-                </nav>
+                </TabsList>
 
-                <div className="tab-body" role="tabpanel">
+                <TabsContent value="results" className="tab-body">
                   {run.error && (
                     <div className="panel-error" role="alert">
                       <strong>{run.error.message}</strong>
@@ -453,15 +455,22 @@ export function App() {
                     </div>
                   )}
 
-                  {outputTab === "results" &&
-                    !run.error &&
+                  {!run.error &&
                     (run.result ? (
                       <ResultsPanel result={run.result} theme={theme} onInspect={inspect} />
                     ) : (
                       <EmptyQueryState connected={status.kind === "connected"} />
                     ))}
+                </TabsContent>
 
-                  {outputTab === "wire" && compileState.compiled && (
+                <TabsContent value="wire" className="tab-body">
+                  {run.error && (
+                    <div className="panel-error" role="alert">
+                      <strong>{run.error.message}</strong>
+                      {run.error.detail && <pre>{run.error.detail}</pre>}
+                    </div>
+                  )}
+                  {compileState.compiled && (
                     <div className="wire-view">
                       <p className="hint-text">
                         Sent to <code>POST /v1/query</code> using the HelixDB Explorer-compatible dynamic query format.
@@ -469,8 +478,8 @@ export function App() {
                       <pre>{compileState.compiled.transportJson}</pre>
                     </div>
                   )}
-                </div>
-              </section>
+                </TabsContent>
+              </Tabs>
             </section>
 
             <InspectorPane
@@ -504,11 +513,11 @@ export function App() {
                 </div>
                 <div className="view-toolbar-actions">
                   {status.kind !== "disconnected" ? (
-                    <button type="button" onClick={refreshCurrentGraph} disabled={graphLoading}>
+                    <Button variant="outline" onClick={refreshCurrentGraph} disabled={graphLoading}>
                       {graphLoading ? "Refreshing…" : "Refresh"}
-                    </button>
+                    </Button>
                   ) : null}
-                  <button type="button" onClick={() => setView("query")}>Edit graph query</button>
+                  <Button variant="outline" onClick={() => setView("query")}>Edit graph query</Button>
                 </div>
               </header>
               <div className="graph-stage">
@@ -533,21 +542,21 @@ export function App() {
                     <span className="empty-icon" aria-hidden="true">!</span>
                     <h2>Couldn’t load the graph</h2>
                     <p>{graphError}</p>
-                    <button type="button" className="primary" onClick={refreshCurrentGraph}>Retry</button>
+                    <Button variant="default" className="primary" onClick={refreshCurrentGraph}>Retry</Button>
                   </div>
                 ) : status.kind !== "connected" ? (
                   <div className="empty-state graph-empty">
                     <span className="empty-icon" aria-hidden="true">⌘</span>
                     <h2>Connect to explore your graph</h2>
                     <p>Choose a local or cloud HelixDB instance. The current graph will load automatically.</p>
-                    <button type="button" className="primary" onClick={() => setConnectionOpenRequest((value) => value + 1)}>Connect Now</button>
+                    <Button variant="default" className="primary" onClick={() => setConnectionOpenRequest((value) => value + 1)}>Connect Now</Button>
                   </div>
                 ) : (
                   <div className="empty-state graph-empty">
                     <span className="empty-icon" aria-hidden="true">⌘</span>
                     <h2>No graph data found</h2>
                     <p>The connected instance did not return any nodes or relationships.</p>
-                    <button type="button" className="primary" onClick={refreshCurrentGraph}>Refresh</button>
+                    <Button variant="default" className="primary" onClick={refreshCurrentGraph}>Refresh</Button>
                   </div>
                 )}
               </div>
@@ -565,33 +574,6 @@ export function App() {
         )}
       </main>
     </div>
-  );
-}
-
-function TabButton({
-  id,
-  active,
-  onSelect,
-  disabled,
-  children,
-}: {
-  id: OutputTab;
-  active: OutputTab;
-  onSelect: (tab: OutputTab) => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active === id}
-      className={active === id ? "tab active" : "tab"}
-      onClick={() => onSelect(id)}
-      disabled={disabled}
-    >
-      {children}
-    </button>
   );
 }
 

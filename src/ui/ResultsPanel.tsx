@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { legendColour, type Theme } from "../graph/palette";
 import { stringify, type LabelCount, type QueryResult, type Row } from "../results";
 
@@ -17,10 +20,10 @@ export function ResultsPanel({ result, theme, onInspect }: Props) {
       return <RowTable columns={result.columns} rows={result.rows} onInspect={onInspect} />;
     case "count":
       return (
-        <div className="stat-tile">
+        <Card className="stat-tile">
           <span className="stat-value">{result.value.toLocaleString()}</span>
           <span className="stat-caption">matching entities</span>
-        </div>
+        </Card>
       );
     case "groupCount":
       return <CountBars title={`by ${result.by}`} groups={result.groups} theme={theme} />;
@@ -35,14 +38,14 @@ export function ResultsPanel({ result, theme, onInspect }: Props) {
       return (
         <div className="stats-layout">
           <div className="stat-row">
-            <div className="stat-tile">
+            <Card className="stat-tile">
               <span className="stat-value">{result.nodeCount.toLocaleString()}</span>
               <span className="stat-caption">nodes</span>
-            </div>
-            <div className="stat-tile">
+            </Card>
+            <Card className="stat-tile">
               <span className="stat-value">{result.edgeCount.toLocaleString()}</span>
               <span className="stat-caption">edges</span>
-            </div>
+            </Card>
           </div>
           <div className="split-panels">
             <CountBars title="Node labels" groups={result.nodeLabels} theme={theme} />
@@ -89,13 +92,13 @@ function RowTable({
 
   return (
     <div className="table-scroll">
-      <table>
-        <thead>
-          <tr>
+      <Table>
+        <TableHeader>
+          <TableRow>
             {columns.map((column) => (
-              <th key={column}>
-                <button
-                  type="button"
+              <TableHead key={column}>
+                <Button
+                  variant="ghost"
                   onClick={() =>
                     setSort((current) =>
                       current?.column === column
@@ -106,24 +109,24 @@ function RowTable({
                 >
                   {column}
                   {sort?.column === column && <span aria-hidden="true">{sort.descending ? " ↓" : " ↑"}</span>}
-                </button>
-              </th>
+                </Button>
+              </TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {sorted.map((row, index) => (
-            <tr key={index}>
+            <TableRow key={index}>
               {columns.map((column) => {
                 const value = row[column];
                 const text = stringify(value);
                 const linkable =
                   (column === "id" || column === "source" || column === "target") && text.length > 0;
                 return (
-                  <td key={column} className={typeof value === "number" || typeof value === "bigint" ? "numeric" : undefined}>
+                  <TableCell key={column} className={typeof value === "number" || typeof value === "bigint" ? "numeric" : undefined}>
                     {linkable ? (
-                      <button
-                        type="button"
+                      <Button
+                        variant="link"
                         className="cell-link"
                         onClick={() =>
                           onInspect(column === "id" && isEdgeTable ? "edge" : "node", text)
@@ -131,17 +134,17 @@ function RowTable({
                         title="Inspect this entity"
                       >
                         {text}
-                      </button>
+                      </Button>
                     ) : (
                       text
                     )}
-                  </td>
+                  </TableCell>
                 );
               })}
-            </tr>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

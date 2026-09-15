@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import type { AppView } from "../App";
 import type { ConnectionUpdate, ConnectionView } from "../client";
 
@@ -50,7 +62,7 @@ export function ConnectionBar({
   }, [openRequest]);
 
   return (
-    <>
+    <Dialog open={open} onOpenChange={setOpen}>
       <header className="app-header">
         <div className="title-bar" data-tauri-drag-region>
           <div className="title-brand">
@@ -60,8 +72,8 @@ export function ConnectionBar({
         </div>
 
         <div className="top-toolbar">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             className={connected ? "toolbar-item connection-item connected" : "toolbar-item connection-item"}
             onClick={() => setOpen(true)}
             title={connected ? `Connected to ${connection?.url ?? "HelixDB"}` : "Configure a connection"}
@@ -69,14 +81,14 @@ export function ConnectionBar({
             <ToolbarIcon name="connection" connected={connected} />
             <span>Connection</span>
             <i className={`toolbar-status status-${status.kind}`} aria-hidden="true" />
-          </button>
+          </Button>
 
-          <span className="toolbar-divider" aria-hidden="true" />
+          <Separator orientation="vertical" className="toolbar-divider" />
 
           <nav className="top-nav" aria-label="Main views">
             {NAV_ITEMS.map((item) => (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 key={item.id}
                 className={activeView === item.id ? `toolbar-item nav-${item.id} active` : `toolbar-item nav-${item.id}`}
                 aria-current={activeView === item.id ? "page" : undefined}
@@ -84,7 +96,7 @@ export function ConnectionBar({
               >
                 <ToolbarIcon name={item.icon} />
                 <span>{item.label}</span>
-              </button>
+              </Button>
             ))}
           </nav>
 
@@ -95,13 +107,13 @@ export function ConnectionBar({
             <span>{describeStatus(status, connection)}</span>
           </div>
 
-          <button type="button" className="theme-button" onClick={onToggleTheme} title="Switch theme" aria-label="Switch theme">
+          <Button variant="ghost" size="icon" className="theme-button" onClick={onToggleTheme} title="Switch theme" aria-label="Switch theme">
             <ToolbarIcon name={theme === "dark" ? "sun" : "moon"} />
-          </button>
+          </Button>
         </div>
       </header>
 
-      {open && (
+      {open ? (
         <ConnectionDialog
           connection={connection}
           connected={connected}
@@ -114,8 +126,8 @@ export function ConnectionBar({
             setOpen(false);
           }}
         />
-      )}
-    </>
+      ) : null}
+    </Dialog>
   );
 }
 
@@ -173,14 +185,6 @@ function ConnectionDialog({
   const [busy, setBusy] = useState<"test" | "connect" | null>(null);
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && busy === null) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onClose]);
-
   const candidate = (): ConnectionUpdate => ({
     url: mode === "local" ? buildLocalUrl(host, port) : normalizeCloudUrl(cloudUrl),
     apiKey: clearKey ? "" : apiKey.length > 0 ? apiKey : undefined,
@@ -225,17 +229,20 @@ function ConnectionDialog({
   };
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && busy === null) onClose();
-    }}>
-      <form className="connection-dialog" onSubmit={submit} aria-labelledby="connection-title">
-        <header className="dialog-header">
+    <DialogContent
+      className="connection-dialog"
+      showCloseButton={false}
+      onEscapeKeyDown={(event) => { if (busy !== null) event.preventDefault(); }}
+      onPointerDownOutside={(event) => { if (busy !== null) event.preventDefault(); }}
+    >
+      <form onSubmit={submit} aria-labelledby="connection-title">
+        <DialogHeader className="dialog-header">
           <div>
-            <h2 id="connection-title">Connection</h2>
-            <p>Connect Helix Visualizer to a local or cloud HelixDB instance.</p>
+            <DialogTitle id="connection-title">Connection</DialogTitle>
+            <DialogDescription>Connect Helix Visualizer to a local or cloud HelixDB instance.</DialogDescription>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} disabled={busy !== null} aria-label="Close">×</button>
-        </header>
+          <Button variant="ghost" size="icon-sm" className="icon-button" onClick={onClose} disabled={busy !== null} aria-label="Close">×</Button>
+        </DialogHeader>
 
         <div className="mode-picker" role="radiogroup" aria-label="Connection type">
           <ModeButton mode="local" active={mode} onSelect={setMode} title="Local" detail="Host and port" />
@@ -246,14 +253,14 @@ function ConnectionDialog({
           {mode === "local" ? (
             <>
               <div className="field-row">
-                <label className="field-label grow">
+                <Label className="field-label grow">
                   <span>Host</span>
-                  <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="127.0.0.1" />
-                </label>
-                <label className="field-label port-field">
+                  <Input value={host} onChange={(event) => setHost(event.target.value)} placeholder="127.0.0.1" />
+                </Label>
+                <Label className="field-label port-field">
                   <span>Host port</span>
-                  <input value={port} inputMode="numeric" onChange={(event) => setPort(event.target.value)} placeholder="6969" />
-                </label>
+                  <Input value={port} inputMode="numeric" onChange={(event) => setPort(event.target.value)} placeholder="6969" />
+                </Label>
               </div>
               <p className="port-hint">
                 For a Docker mapping such as <code>6969:8080</code>, enter the left-side host port: <code>6969</code>.
@@ -261,43 +268,43 @@ function ConnectionDialog({
             </>
           ) : (
             <>
-              <label className="field-label">
+              <Label className="field-label">
                 <span>Cloud instance URL</span>
-                <input value={cloudUrl} onChange={(event) => setCloudUrl(event.target.value)} placeholder="https://your-instance.example.com" />
-              </label>
-              <label className="field-label">
+                <Input value={cloudUrl} onChange={(event) => setCloudUrl(event.target.value)} placeholder="https://your-instance.example.com" />
+              </Label>
+              <Label className="field-label">
                 <span>Cluster API key</span>
-                <input
+                <Input
                   type="password"
                   value={apiKey}
                   onChange={(event) => setApiKey(event.target.value)}
                   placeholder={connection?.hasApiKey ? "•••••••• (saved)" : "Enter API key"}
                   disabled={clearKey}
                 />
-              </label>
+              </Label>
               {connection?.hasApiKey ? (
-                <label className="check-field">
-                  <input type="checkbox" checked={clearKey} onChange={(event) => setClearKey(event.target.checked)} />
+                <Label className="check-field">
+                  <Checkbox checked={clearKey} onCheckedChange={(checked) => setClearKey(checked === true)} />
                   Remove the saved API key
-                </label>
+                </Label>
               ) : null}
             </>
           )}
 
-          <button type="button" className="advanced-toggle" onClick={() => setAdvanced((value) => !value)} aria-expanded={advanced}>
+          <Button variant="ghost" size="sm" className="advanced-toggle" onClick={() => setAdvanced((value) => !value)} aria-expanded={advanced}>
             <span aria-hidden="true">{advanced ? "⌄" : "›"}</span> Advanced options
-          </button>
+          </Button>
 
           {advanced ? (
             <div className="advanced-fields">
-              <label className="field-label">
+              <Label className="field-label">
                 <span>Request timeout (ms)</span>
-                <input type="number" min={1000} max={600000} step={1000} value={timeout} onChange={(event) => setTimeoutMs(Number(event.target.value))} />
-              </label>
-              <label className="check-field">
-                <input type="checkbox" checked={writerOnly} onChange={(event) => setWriterOnly(event.target.checked)} />
+                <Input type="number" min={1000} max={600000} step={1000} value={timeout} onChange={(event) => setTimeoutMs(Number(event.target.value))} />
+              </Label>
+              <Label className="check-field">
+                <Checkbox checked={writerOnly} onCheckedChange={(checked) => setWriterOnly(checked === true)} />
                 Require a writer node
-              </label>
+              </Label>
             </div>
           ) : null}
 
@@ -309,25 +316,25 @@ function ConnectionDialog({
         </div>
 
         <footer className="dialog-actions">
-          {connected ? <button type="button" className="danger-button" onClick={onDisconnect} disabled={busy !== null}>Disconnect</button> : <span />}
+          {connected ? <Button variant="destructive" className="danger-button" onClick={onDisconnect} disabled={busy !== null}>Disconnect</Button> : <span />}
           <div>
-            <button type="button" onClick={test} disabled={busy !== null}>{busy === "test" ? "Testing…" : "Test connection"}</button>
-            <button type="submit" className="primary" disabled={busy !== null}>{busy === "connect" ? "Connecting…" : connected ? "Reconnect" : "Connect"}</button>
+            <Button variant="outline" onClick={test} disabled={busy !== null}>{busy === "test" ? "Testing…" : "Test connection"}</Button>
+            <Button type="submit" variant="default" className="primary" disabled={busy !== null}>{busy === "connect" ? "Connecting…" : connected ? "Reconnect" : "Connect"}</Button>
           </div>
         </footer>
       </form>
-    </div>
+    </DialogContent>
   );
 }
 
 function ModeButton({ mode, active, onSelect, title, detail }: { mode: ConnectionMode; active: ConnectionMode; onSelect: (mode: ConnectionMode) => void; title: string; detail: string }) {
   const selected = active === mode;
   return (
-    <button type="button" role="radio" aria-checked={selected} className={selected ? "mode-card active" : "mode-card"} onClick={() => onSelect(mode)}>
+    <Button variant="outline" role="radio" aria-checked={selected} className={selected ? "mode-card active h-auto" : "mode-card h-auto"} onClick={() => onSelect(mode)}>
       <ToolbarIcon name={mode === "local" ? "desktop" : "cloud"} />
       <span><strong>{title}</strong><small>{detail}</small></span>
       <i aria-hidden="true">{selected ? "✓" : ""}</i>
-    </button>
+    </Button>
   );
 }
 

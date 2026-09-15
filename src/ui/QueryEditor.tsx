@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
+import { Textarea } from "@/components/ui/textarea";
 import { HqlError } from "../hql/ast";
 
 interface Props {
@@ -58,11 +61,11 @@ export function QueryEditor({ value, onChange, onRun, running, error }: Props) {
       <header>
         <h2>Query</h2>
         <div className="editor-actions">
-          <kbd>{navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}</kbd>
-          <kbd>↵</kbd>
-          <button type="button" className="primary" onClick={onRun} disabled={running}>
+          <Kbd>{navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}</Kbd>
+          <Kbd>↵</Kbd>
+          <Button variant="default" className="primary" onClick={onRun} disabled={running}>
             {running ? "Running…" : "Run"}
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -74,7 +77,7 @@ export function QueryEditor({ value, onChange, onRun, running, error }: Props) {
             </span>
           ))}
         </div>
-        <textarea
+        <Textarea
           ref={textareaRef}
           value={value}
           spellCheck={false}
@@ -89,9 +92,9 @@ export function QueryEditor({ value, onChange, onRun, running, error }: Props) {
 
       {error && (
         <p className="editor-error" role="alert">
-          <button type="button" onClick={jumpToError}>
+          <Button variant="link" onClick={jumpToError}>
             {error.span ? `line ${error.span.line}:${error.span.column}` : "error"}
-          </button>
+          </Button>
           <span>{error.message}</span>
           {error.hint && <em>{error.hint}</em>}
         </p>

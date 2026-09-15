@@ -1,3 +1,5 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { LabelCount } from "../results";
 import type { Schema } from "../schema";
 
@@ -46,9 +48,9 @@ export function Sidebar({
       <section>
         <header className="section-header">
           <h2>Schema</h2>
-          <button type="button" onClick={onRefreshSchema} disabled={refreshing}>
+          <Button variant="ghost" size="sm" onClick={onRefreshSchema} disabled={refreshing}>
             {refreshing ? "…" : "Refresh"}
-          </button>
+          </Button>
         </header>
 
         {schemaError && <p className="panel-error">{schemaError}</p>}
@@ -85,9 +87,9 @@ export function Sidebar({
         <ul className="link-list">
           {EXAMPLES.map((example) => (
             <li key={example.title}>
-              <button type="button" onClick={() => onUseQuery(example.query)}>
+              <Button variant="ghost" onClick={() => onUseQuery(example.query)}>
                 {example.title}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -101,9 +103,9 @@ export function Sidebar({
           <ul className="link-list">
             {history.map((query, index) => (
               <li key={`${index}-${query}`}>
-                <button type="button" onClick={() => onUseQuery(query)} title={query}>
+                <Button variant="ghost" onClick={() => onUseQuery(query)} title={query}>
                   {query.replace(/\s+/g, " ").slice(0, 48)}
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -140,18 +142,19 @@ function LabelList({
       <ul className="label-list">
         {labels.map((entry) => (
           <li key={entry.label}>
-            <button type="button" onClick={() => onUseQuery(toQuery(entry.label))} title={toQuery(entry.label)}>
+            <Button variant="ghost" onClick={() => onUseQuery(toQuery(entry.label))} title={toQuery(entry.label)}>
               {entry.label}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
               className="label-alt"
               onClick={() => onUseQuery(toAltQuery(entry.label))}
               title={toAltQuery(entry.label)}
             >
               ⋯
-            </button>
-            <span className="label-count">{entry.count.toLocaleString()}</span>
+            </Button>
+            <Badge variant="outline" className="label-count">{entry.count.toLocaleString()}</Badge>
           </li>
         ))}
       </ul>

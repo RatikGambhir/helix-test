@@ -1,5 +1,12 @@
 import { useMemo, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   filterSchemaEntries,
   formatSchemaValue,
@@ -77,24 +84,24 @@ export function SchemaView({
       <h1 id="schema-page-title" className="visually-hidden">Schema</h1>
 
       <header className="schema-toolbar">
-        <label className="schema-search">
+        <Label className="schema-search">
           <SchemaIcon name="search" />
           <span className="visually-hidden">Search schema labels</span>
-          <input
+          <Input
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder={`Search ${category}…`}
           />
           {search ? (
-            <button type="button" onClick={() => setSearch("")} aria-label="Clear search">×</button>
+            <Button variant="ghost" size="icon-sm" onClick={() => setSearch("")} aria-label="Clear search">×</Button>
           ) : null}
-        </label>
+        </Label>
 
         <nav className="schema-categories" aria-label="Schema categories">
           {CATEGORIES.map((item) => (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               key={item.id}
               className={category === item.id ? `schema-category ${item.id} active` : `schema-category ${item.id}`}
               aria-current={category === item.id ? "page" : undefined}
@@ -106,21 +113,21 @@ export function SchemaView({
               <SchemaIcon name={item.id} />
               <span>{item.label}</span>
               <strong>{countFor(item.id)}</strong>
-            </button>
+            </Button>
           ))}
         </nav>
 
         <div className="schema-toolbar-spacer" />
         <div className="schema-actions">
-          <button type="button" onClick={toggleAll} disabled={entries.length === 0}>
+          <Button variant="outline" onClick={toggleAll} disabled={entries.length === 0}>
             <SchemaIcon name="expand" />
             {allVisibleExpanded ? "Collapse" : "Expand"}
-          </button>
-          <span aria-hidden="true" />
-          <button type="button" onClick={onRefresh} disabled={!connected || loading}>
+          </Button>
+          <Separator orientation="vertical" />
+          <Button variant="outline" onClick={onRefresh} disabled={!connected || loading}>
             <SchemaIcon name="refresh" spinning={loading} />
             {loading ? "Refreshing…" : "Refresh"}
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -136,14 +143,14 @@ export function SchemaView({
             <span className="empty-icon" aria-hidden="true">!</span>
             <h2>Couldn’t load the schema</h2>
             <p>{error}</p>
-            <button type="button" className="primary" onClick={onRefresh}>Try again</button>
+            <Button variant="default" className="primary" onClick={onRefresh}>Try again</Button>
           </div>
         ) : !connected ? (
           <div className="schema-page-state">
             <span className="empty-icon" aria-hidden="true"><SchemaIcon name="nodes" /></span>
             <h2>Connect to inspect your schema</h2>
             <p>Choose a local or cloud HelixDB instance to discover its node and edge labels.</p>
-            <button type="button" className="primary" onClick={onConnect}>Connect Now</button>
+            <Button variant="default" className="primary" onClick={onConnect}>Connect Now</Button>
           </div>
         ) : loading && !schema ? (
           <div className="schema-page-state" role="status">
@@ -202,13 +209,13 @@ function SchemaCard({
 }) {
   const query = schemaQueryFor(category, entry.label);
   return (
-    <article className={expanded ? `schema-card ${category} expanded` : `schema-card ${category}`}>
-      <button type="button" className="schema-card-summary" onClick={onToggle} aria-expanded={expanded}>
+    <Card className={expanded ? `schema-card ${category} expanded` : `schema-card ${category}`}>
+      <Button variant="ghost" className="schema-card-summary" onClick={onToggle} aria-expanded={expanded}>
         <span className="schema-card-icon" aria-hidden="true"><SchemaIcon name={category} /></span>
         <strong title={entry.label}>{entry.label}</strong>
-        <span className="schema-card-count" title="Observed entities">{entry.count.toLocaleString()}</span>
+        <Badge variant="outline" className="schema-card-count" title="Observed entities">{entry.count.toLocaleString()}</Badge>
         <SchemaIcon name="chevron" />
-      </button>
+      </Button>
       {expanded ? (
         <div className="schema-card-detail">
           <dl>
@@ -227,18 +234,18 @@ function SchemaCard({
               <p className="schema-field-message">No stored properties found in the sampled {category}.</p>
             ) : (
               <div className="schema-property-scroll">
-                <table className="schema-property-table">
-                  <thead>
-                    <tr><th>Property</th><th>Sample value</th></tr>
-                  </thead>
-                  <tbody>
+                <Table className="schema-property-table">
+                  <TableHeader>
+                    <TableRow><TableHead>Property</TableHead><TableHead>Sample value</TableHead></TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {entry.fields.map((field) => (
-                      <tr key={field.name}>
-                        <th scope="row">
+                      <TableRow key={field.name}>
+                        <TableHead scope="row">
                           <code title={field.name}>{field.name}</code>
                           <small>{field.types.join(" | ")}</small>
-                        </th>
-                        <td>
+                        </TableHead>
+                        <TableCell>
                           <div className="schema-field-values">
                             {field.values.map((value, index) => {
                               const formatted = formatSchemaValue(value);
@@ -246,18 +253,18 @@ function SchemaCard({
                             })}
                           </div>
                           <small>{field.presentOn}/{entry.fieldSample} sampled</small>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             )}
           </section>
-          <button type="button" onClick={() => onUseQuery(query)}>Open in Query</button>
+          <Button variant="outline" onClick={() => onUseQuery(query)}>Open in Query</Button>
         </div>
       ) : null}
-    </article>
+    </Card>
   );
 }
 

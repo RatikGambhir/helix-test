@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 /*
  * Both themes are selected rather than one being an inversion of the other.
  * The chart surface, ink and hairline values match graph/palette.ts, which the
@@ -22,7 +24,7 @@
   --overlay: rgba(0, 0, 0, 0.48);
 
   --radius: 8px;
-  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 
   color-scheme: dark;
@@ -68,7 +70,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-button {
+button:not([data-slot="button"]) {
   font: inherit;
   color: inherit;
   background: var(--surface-2);
@@ -78,12 +80,12 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+button:not([data-slot="button"]):hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
   background: color-mix(in srgb, var(--surface-2) 84%, var(--accent));
 }
 
-button:disabled {
+button:not([data-slot="button"]):disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -95,8 +97,8 @@ button.primary {
   font-weight: 600;
 }
 
-input,
-textarea {
+input:not([data-slot="input"]),
+textarea:not([data-slot="textarea"]) {
   font: inherit;
   color: var(--ink);
   background: color-mix(in srgb, var(--surface-elevated) 90%, transparent);
@@ -105,9 +107,9 @@ textarea {
   padding: 7px 9px;
 }
 
-input:focus-visible,
-textarea:focus-visible,
-button:focus-visible {
+input:not([data-slot="input"]):focus-visible,
+textarea:not([data-slot="textarea"]):focus-visible,
+button:not([data-slot="button"]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -461,7 +463,8 @@ kbd {
   border-color: transparent;
 }
 
-.tab.active {
+.tab.active,
+.tab[data-state="active"] {
   background: var(--surface-2);
   border-color: var(--border);
   font-weight: 600;
@@ -680,60 +683,264 @@ td.numeric {
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   overflow: hidden;
+  background: color-mix(in srgb, var(--surface-0) 97%, var(--accent));
 }
 
-.graph-canvas canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
+.graph-canvas .react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-dots-color: color-mix(in srgb, var(--ink-muted) 30%, transparent);
+  --xy-edge-stroke: color-mix(in srgb, var(--ink-muted) 58%, transparent);
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-edge-stroke-width: 1.25;
+  --xy-node-border-radius: 9px;
+  --xy-controls-button-background-color: color-mix(in srgb, var(--surface-elevated) 96%, transparent);
+  --xy-controls-button-background-color-hover: color-mix(in srgb, var(--surface-elevated) 84%, var(--accent));
+  --xy-controls-button-color: var(--ink-secondary);
+  --xy-controls-button-color-hover: var(--ink);
+  --xy-controls-button-border-color: var(--hairline);
+  --xy-minimap-background-color: color-mix(in srgb, var(--surface-elevated) 94%, transparent);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--surface-0) 64%, transparent);
+}
+
+.graph-canvas .react-flow__renderer {
   cursor: grab;
 }
 
-.graph-canvas canvas:active {
+.graph-canvas .react-flow__renderer:active {
   cursor: grabbing;
 }
 
-.graph-controls {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: flex;
-  gap: 4px;
+.graph-canvas .react-flow__node {
+  transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.graph-controls button {
-  background: var(--surface-1);
-  min-width: 30px;
+.graph-canvas .react-flow__node.is-dimmed,
+.graph-canvas .react-flow__edge.is-dimmed {
+  opacity: 0.12;
 }
 
-.graph-legend {
-  position: absolute;
-  left: 10px;
-  bottom: 10px;
-  max-height: 45%;
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: 8px 10px;
-  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+.entity-node {
+  --node-colour: var(--ink-muted);
+  position: relative;
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: 10px;
+  width: 164px;
+  min-height: 52px;
+  padding: 8px 12px 8px 9px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface-elevated) 96%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 9px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 4px 12px rgba(0, 0, 0, 0.08);
+  cursor: grab;
+  transition:
+    border-color 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    box-shadow 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.entity-node:hover {
+  border-color: color-mix(in srgb, var(--node-colour) 55%, var(--border));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-colour) 13%, transparent),
+    0 6px 16px rgba(0, 0, 0, 0.14);
+  transform: translateY(-1px);
+}
+
+.entity-node:active {
+  cursor: grabbing;
+  transform: scale(0.98);
+}
+
+.entity-node.is-selected {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent),
+    0 6px 16px rgba(0, 0, 0, 0.14);
+}
+
+.entity-node-accent {
+  width: 4px;
+  height: 28px;
+  border-radius: 3px;
+  background: var(--node-colour);
+}
+
+.entity-node-copy {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 3px;
 }
 
-.graph-legend li {
+.entity-node-caption {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-node-meta {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-node-port {
+  width: 7px;
+  height: 7px;
+  border: 2px solid color-mix(in srgb, var(--node-colour) 70%, var(--ink));
+  border-radius: 50%;
+  opacity: 0.68;
+}
+
+.entity-node .react-flow__handle {
+  width: 2px;
+  height: 2px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.graph-canvas .react-flow__edge-path {
+  transition:
+    stroke 130ms cubic-bezier(0.23, 1, 0.32, 1),
+    stroke-width 130ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.graph-canvas .react-flow__edge:hover .react-flow__edge-path,
+.graph-canvas .react-flow__edge-path.is-selected {
+  stroke: var(--accent);
+  stroke-width: 2.25;
+}
+
+.graph-canvas .react-flow__edge.is-dimmed {
+  pointer-events: none;
+}
+
+.edge-label {
+  position: absolute;
+  max-width: 160px;
+  overflow: hidden;
+  padding: 3px 7px;
+  color: var(--ink-secondary);
+  background: color-mix(in srgb, var(--surface-elevated) 96%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  pointer-events: all;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-canvas .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+}
+
+.graph-canvas .react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+}
+
+.graph-canvas .react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+
+.graph-canvas .react-flow__controls-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.graph-canvas .react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+}
+
+.graph-legend-panel {
+  width: 178px;
+  max-height: min(320px, 45%);
+  overflow: hidden;
+  color: var(--ink-secondary);
+  background: color-mix(in srgb, var(--surface-elevated) 94%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(12px);
+}
+
+.graph-legend-heading {
   display: flex;
+  justify-content: space-between;
+  padding: 7px 9px 6px;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--ink-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.graph-legend {
+  max-height: 250px;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.graph-legend button {
+  display: flex;
+  width: 100%;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  padding: 5px 6px;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 5px;
+  text-align: left;
+}
+
+.graph-legend button:hover,
+.graph-legend button:focus-visible {
+  background: var(--surface-2);
+  border-color: transparent;
 }
 
 .swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
   flex: none;
 }
 
@@ -747,28 +954,33 @@ td.numeric {
 .legend-count {
   margin-left: auto;
   color: var(--ink-muted);
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
-.graph-tooltip {
-  position: absolute;
-  z-index: 10;
-  pointer-events: none;
-  max-width: 300px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 7px 9px;
-  background: var(--surface-1);
+.graph-help {
+  padding: 5px 8px;
+  color: var(--ink-muted);
+  background: color-mix(in srgb, var(--surface-elevated) 90%, transparent);
   border: 1px solid var(--hairline);
   border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
-  font-size: 11.5px;
-  color: var(--ink-secondary);
+  font-size: 10px;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
 }
 
-.graph-tooltip strong {
-  color: var(--ink);
+.graph-canvas .react-flow__attribution {
+  color: var(--ink-muted);
+  background: color-mix(in srgb, var(--surface-elevated) 75%, transparent);
+  font-size: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-canvas .react-flow__node,
+  .entity-node,
+  .graph-canvas .react-flow__edge-path {
+    transition: none;
+  }
 }
 
 .graph-caveats {
@@ -1141,7 +1353,8 @@ td.numeric {
   background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
-.tab.active {
+.tab.active,
+.tab[data-state="active"] {
   color: var(--accent);
   border-bottom-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, transparent);
@@ -1342,7 +1555,7 @@ td.numeric {
   gap: 8px;
 }
 
-.schema-actions > span {
+.schema-actions > [data-slot="separator"] {
   width: 1px;
   height: 25px;
   margin: 0 2px;
@@ -2029,7 +2242,7 @@ td.numeric {
   .schema-category > span { display: inline; }
   .schema-toolbar-spacer { display: none; }
   .schema-actions button:first-of-type,
-  .schema-actions > span { display: none; }
+  .schema-actions > [data-slot="separator"] { display: none; }
   .schema-content { padding: 16px 12px 28px; }
   .schema-card-grid { grid-template-columns: 1fr; }
   .field-row { flex-direction: column; }
@@ -2045,3 +2258,4 @@ td.numeric {
     transition-duration: 0.01ms !important;
   }
 }
+@import "tailwindcss";
