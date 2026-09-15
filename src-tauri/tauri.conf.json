@@ -5,7 +5,7 @@
   "identifier": "com.helixvisualizer.app",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:14237",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },

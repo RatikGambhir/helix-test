@@ -9,10 +9,10 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
-    port: 5173,
+    port: 14237,
     strictPort: true,
     host: host || false,
-    hmr: host ? { protocol: "ws", host, port: 5174 } : undefined,
+    hmr: host ? { protocol: "ws", host, port: 14238 } : undefined,
     watch: { ignored: ["**/src-tauri/**"] },
     // Only used when the frontend is opened in a plain browser instead of the
     // Tauri window; the desktop app routes queries through the Rust backend.

@@ -79,7 +79,7 @@ iteration:
 
 ```bash
 npm run mock
-npm run dev                        # http://localhost:5173
+npm run dev                        # http://localhost:14237
 ```
 
 In that mode there is no Rust backend, so queries go through Vite's `/helix`
