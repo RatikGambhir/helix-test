@@ -21,8 +21,8 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { RotateCcw } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import type { GraphData } from "../results";
 import { ForceLayout } from "./layout";
 import { LabelPalette, legendColour, type Theme } from "./palette";
@@ -63,8 +63,8 @@ type RelationshipEdge = Edge<RelationshipEdgeData, "relationship">;
 const NODE_TYPES = { entity: EntityNodeCard };
 const EDGE_TYPES = { relationship: RelationshipEdgePath };
 const NODE_ORIGIN: [number, number] = [0.5, 0.5];
-const CARD_WIDTH = 164;
-const CARD_HEIGHT = 52;
+const CARD_WIDTH = 156;
+const CARD_HEIGHT = 44;
 const CARD_GAP = 18;
 
 export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Props) {
@@ -177,7 +177,7 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} />
         <Controls position="top-right" showInteractive={false}>
           <ControlButton onClick={restoreLayout} title="Reset node layout" aria-label="Reset node layout">
-            <ResetIcon />
+            <RotateCcw aria-hidden="true" />
           </ControlButton>
         </Controls>
         {graph.nodes.length <= 500 ? (
@@ -192,29 +192,31 @@ export function GraphCanvas({ graph, theme, selectedId, onSelect, onExpand }: Pr
         ) : null}
         <Panel position="bottom-left" className="graph-legend-panel">
           <div className="graph-legend-heading">
-            <span>Node labels</span>
-            <span>{graph.nodes.length.toLocaleString()} total</span>
+            <span>Labels</span>
+            <span>{graph.nodes.length.toLocaleString()} nodes</span>
           </div>
           <ul className="graph-legend" aria-label="Node labels">
             {palette.legend.map((entry) => (
               <li key={`${entry.slot ?? "other"}-${entry.label}`}>
-                <Button
-                  variant="ghost"
+                <button
+                  type="button"
+                  className="graph-legend-item"
                   onMouseEnter={() => setHoveredLabel(entry.slot === null ? null : entry.label)}
                   onMouseLeave={() => setHoveredLabel(null)}
                   onFocus={() => setHoveredLabel(entry.slot === null ? null : entry.label)}
                   onBlur={() => setHoveredLabel(null)}
+                  title={entry.slot === null ? undefined : `Highlight ${entry.label}`}
                 >
                   <span className="swatch" style={{ background: legendColour(entry, theme) }} aria-hidden="true" />
                   <span className="legend-label">{entry.label}</span>
                   <span className="legend-count">{entry.count.toLocaleString()}</span>
-                </Button>
+                </button>
               </li>
             ))}
           </ul>
         </Panel>
         <Panel position="top-left" className="graph-help">
-          Drag nodes · scroll to zoom · drag canvas to pan · shift-drag to select
+          Drag nodes · scroll to zoom · drag to pan · shift-drag to select · double-click to expand
         </Panel>
       </ReactFlow>
     </div>
@@ -236,14 +238,12 @@ function EntityNodeCard({ data, selected }: NodeProps<EntityNode>) {
       style={{ "--node-colour": data.colour } as React.CSSProperties}
       title={description}
     >
-      <span className="entity-node-accent" aria-hidden="true" />
-      <div className="entity-node-copy">
-        <span className="entity-node-caption">{data.caption}</span>
-        <span className="entity-node-meta">
-          {data.label ?? "Unlabelled"} <span aria-hidden="true">·</span> {data.degree}
-        </span>
-      </div>
-      <span className="entity-node-port" aria-hidden="true" />
+      <span className="entity-node-swatch" aria-hidden="true" />
+      <span className="entity-node-caption">{data.caption}</span>
+      <span className="entity-node-meta">
+        <span className="entity-node-label">{data.label ?? "Unlabelled"}</span>
+        <span className="entity-node-degree" aria-hidden="true">{data.degree}</span>
+      </span>
       {([Position.Top, Position.Right, Position.Bottom, Position.Left] as const).flatMap((position) => {
         const side = position.toLowerCase();
         return [
@@ -421,12 +421,4 @@ function nodeCaption(properties: Record<string, unknown>, label: string | null, 
 
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
-}
-
-function ResetIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4.8 7.7A8 8 0 1 1 4 14M4.8 7.7V3.5m0 4.2H9" />
-    </svg>
-  );
 }

@@ -26,11 +26,15 @@ connection, `/v1/query`, and automatic graph-loading change log.
   one a click away from a query.
 - **Wire format tab** — the exact Explorer-compatible JSON sent to
   `POST /v1/query`, so nothing about the translation is hidden.
-- **Shared UI system** — local shadcn-style components backed by Radix
-  primitives provide consistent buttons, fields, tabs, tables, checkboxes,
-  dialogs and accessible keyboard behaviour.
-- **Typography** — Inter is bundled for the application interface; the
-  HelixSQL query editor and other code/wire-format surfaces remain monospaced.
+- **Design system** — warm graphite chrome in light and dark themes, so the
+  label colours on the canvas and in charts carry all the meaning. One signal
+  accent marks the primary action, the active workspace, focus and selection.
+  Tokens live at the top of `src/styles.css`; Radix-backed primitives in
+  `src/components/ui` use them through Tailwind.
+- **Typography** — IBM Plex Sans for the interface and IBM Plex Mono for the
+  HelixSQL editor, ids, numbers and wire-format surfaces, both bundled.
+- **Responsive panes** — on narrower windows the Library and Inspector become
+  drawers, toggled from the top bar and dismissed with `Esc`.
 
 Queries are read-only by construction: the compiler only ever emits a `read`
 batch, and there is no syntax for writes. Use a HelixDB SDK for those.

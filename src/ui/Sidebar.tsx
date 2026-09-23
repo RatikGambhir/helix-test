@@ -1,6 +1,8 @@
-import { Badge } from "@/components/ui/badge";
+import { RotateCw, Table2, Waypoints } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import type { Schema, SchemaLabel } from "../schema";
+import { ErrorNotice } from "./feedback";
 
 interface Props {
   schema: Schema | null;
@@ -34,6 +36,7 @@ const EXAMPLES: { title: string; query: string }[] = [
   { title: "Instance stats", query: "SHOW STATS" },
 ];
 
+/** Everything that can be loaded into the editor: labels, examples, history. */
 export function Sidebar({
   schema,
   schemaError,
@@ -43,19 +46,28 @@ export function Sidebar({
   onUseQuery,
 }: Props) {
   return (
-    <aside className="sidebar">
-      <section>
-        <header className="section-header">
-          <h2>Schema</h2>
-          <Button variant="ghost" size="sm" onClick={onRefreshSchema} disabled={refreshing}>
-            {refreshing ? "…" : "Refresh"}
+    <div className="library">
+      <section className="library-section" aria-labelledby="library-schema">
+        <header className="library-heading">
+          <h3 id="library-schema">Schema</h3>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onRefreshSchema}
+            disabled={refreshing}
+            aria-label="Refresh schema"
+            title="Refresh schema"
+          >
+            <RotateCw className={refreshing ? "is-spinning" : undefined} />
           </Button>
         </header>
 
-        {schemaError && <p className="panel-error">{schemaError}</p>}
-        {!schema && !schemaError && <p className="hint-text">Not loaded yet.</p>}
+        {schemaError ? <ErrorNotice message={schemaError} /> : null}
+        {!schema && !schemaError ? (
+          <p className="library-note">Labels appear here once connected.</p>
+        ) : null}
 
-        {schema && (
+        {schema ? (
           <>
             <LabelList
               title="Nodes"
@@ -71,46 +83,48 @@ export function Sidebar({
               primary="browseQuery"
               secondary="graphQuery"
             />
-            <p className="hint-text">
-              Derived from a sample of {schema.sample.toLocaleString()} entities per side — rare
-              labels may be missing.
+            <p className="library-note">
+              Sampled from up to {schema.sample.toLocaleString()} entities per side; rare labels
+              may be missing.
             </p>
           </>
-        )}
+        ) : null}
       </section>
 
-      <section>
-        <header className="section-header">
-          <h2>Examples</h2>
+      <section className="library-section" aria-labelledby="library-examples">
+        <header className="library-heading">
+          <h3 id="library-examples">Examples</h3>
         </header>
-        <ul className="link-list">
+        <ul className="library-list">
           {EXAMPLES.map((example) => (
             <li key={example.title}>
-              <Button variant="ghost" onClick={() => onUseQuery(example.query)}>
-                {example.title}
-              </Button>
+              <button type="button" className="library-item" onClick={() => onUseQuery(example.query)}>
+                <span className="library-item-title">{example.title}</span>
+                <code className="library-item-code">{firstLine(example.query)}</code>
+              </button>
             </li>
           ))}
         </ul>
       </section>
 
-      {history.length > 0 && (
-        <section>
-          <header className="section-header">
-            <h2>History</h2>
+      {history.length > 0 ? (
+        <section className="library-section" aria-labelledby="library-history">
+          <header className="library-heading">
+            <h3 id="library-history">History</h3>
+            <span className="library-count">{history.length}</span>
           </header>
-          <ul className="link-list">
+          <ul className="library-list">
             {history.map((query, index) => (
               <li key={`${index}-${query}`}>
-                <Button variant="ghost" onClick={() => onUseQuery(query)} title={query}>
-                  {query.replace(/\s+/g, " ").slice(0, 48)}
-                </Button>
+                <button type="button" className="library-item is-code" onClick={() => onUseQuery(query)} title={query}>
+                  <code className="library-item-code">{query.replace(/\s+/g, " ")}</code>
+                </button>
               </li>
             ))}
           </ul>
         </section>
-      )}
-    </aside>
+      ) : null}
+    </div>
   );
 }
 
@@ -127,36 +141,46 @@ function LabelList({
   primary: "browseQuery" | "graphQuery";
   secondary: "browseQuery" | "graphQuery";
 }) {
-  if (labels.length === 0) {
-    return (
-      <div className="label-group">
-        <h3>{title}</h3>
-        <p className="hint-text">None found.</p>
-      </div>
-    );
-  }
+  const SecondaryIcon = secondary === "graphQuery" ? Waypoints : Table2;
+  const secondaryName = secondary === "graphQuery" ? "Draw as graph" : "Browse as rows";
+
   return (
     <div className="label-group">
-      <h3>{title}</h3>
-      <ul className="label-list">
-        {labels.map((entry) => (
-          <li key={entry.label}>
-            <Button variant="ghost" onClick={() => onUseQuery(entry[primary])} title={entry[primary]}>
-              {entry.label}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="label-alt"
-              onClick={() => onUseQuery(entry[secondary])}
-              title={entry[secondary]}
-            >
-              ⋯
-            </Button>
-            <Badge variant="outline" className="label-count">{entry.count.toLocaleString()}</Badge>
-          </li>
-        ))}
-      </ul>
+      <h4>{title}</h4>
+      {labels.length === 0 ? (
+        <p className="library-note">None found.</p>
+      ) : (
+        <ul className="library-list">
+          {labels.map((entry) => (
+            <li key={entry.label} className="label-row">
+              <button
+                type="button"
+                className="library-item"
+                onClick={() => onUseQuery(entry[primary])}
+                title={entry[primary]}
+              >
+                <span className="library-item-title">{entry.label}</span>
+                <span className="library-item-count">{entry.count.toLocaleString()}</span>
+              </button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="label-row-alt"
+                onClick={() => onUseQuery(entry[secondary])}
+                aria-label={`${secondaryName}: ${entry.label}`}
+                title={`${secondaryName} — ${entry[secondary]}`}
+              >
+                <SecondaryIcon />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
+}
+
+function firstLine(query: string): string {
+  const [line, ...rest] = query.split("\n");
+  return rest.length > 0 ? `${line} …` : line;
 }

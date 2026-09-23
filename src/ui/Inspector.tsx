@@ -1,6 +1,8 @@
-import { Badge } from "@/components/ui/badge";
+import { ArrowDownLeft, ArrowUpRight, MousePointerClick, Network } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { stringify, type QueryResult } from "../results";
+import { EmptyState, ErrorNotice } from "./feedback";
 
 interface Props {
   /** The most recent DESCRIBE result, if one has been run. */
@@ -16,14 +18,16 @@ interface Props {
  * side of the app, as opposed to the whole-graph picture.
  */
 export function Inspector({ detail, loading, error, onInspect, onFocusInGraph }: Props) {
-  if (loading) return <p className="hint-text">Loading…</p>;
-  if (error) return <p className="panel-error">{error}</p>;
+  if (loading) {
+    return <EmptyState className="is-compact" loading title="Loading entity" />;
+  }
+  if (error) return <div className="inspector"><ErrorNotice message={error} /></div>;
   if (!detail) {
     return (
-      <p className="hint-text">
+      <EmptyState className="is-compact" icon={MousePointerClick} title="Nothing selected">
         Select a node or edge in the graph, click an id in the results, or run{" "}
         <code>DESCRIBE NODE &lt;id&gt;</code>.
-      </p>
+      </EmptyState>
     );
   }
 
@@ -31,26 +35,29 @@ export function Inspector({ detail, loading, error, onInspect, onFocusInGraph }:
 
   return (
     <div className="inspector">
-      <header>
-        <Badge variant="default" className="entity-kind">{detail.entity === "nodes" ? "Node" : "Edge"}</Badge>
+      <header className="inspector-head">
+        <span className="eyebrow">{detail.entity === "nodes" ? "Node" : "Edge"}</span>
         <h3>{detail.label ?? "(no label)"}</h3>
-        {detail.id && <code className="entity-id">{detail.id}</code>}
-        {detail.entity === "nodes" && detail.id && (
-          <Button variant="outline" onClick={() => onFocusInGraph(detail.id!)}>
+        {detail.id ? <code className="inspector-id">id {detail.id}</code> : null}
+        {detail.entity === "nodes" && detail.id ? (
+          <Button variant="outline" size="sm" onClick={() => onFocusInGraph(detail.id!)}>
+            <Network />
             Show neighbourhood
           </Button>
-        )}
+        ) : null}
       </header>
 
-      <section>
-        <h4>Properties</h4>
+      <section className="inspector-section">
+        <h4 className="eyebrow">
+          Properties <span className="eyebrow-count">{properties.length}</span>
+        </h4>
         {properties.length === 0 ? (
-          <p className="hint-text">No stored properties.</p>
+          <p className="inspector-note">No stored properties.</p>
         ) : (
           <dl className="property-list">
             {properties.map(([key, value]) => (
               <div key={key}>
-                <dt>{key}</dt>
+                <dt title={key}>{key}</dt>
                 <dd>{stringify(value)}</dd>
               </div>
             ))}
@@ -58,9 +65,9 @@ export function Inspector({ detail, loading, error, onInspect, onFocusInGraph }:
         )}
       </section>
 
-      {detail.entity === "edges" && detail.endpoints && (
-        <section>
-          <h4>Endpoints</h4>
+      {detail.entity === "edges" && detail.endpoints ? (
+        <section className="inspector-section">
+          <h4 className="eyebrow">Endpoints</h4>
           <ul className="relation-list">
             {(
               [
@@ -71,41 +78,45 @@ export function Inspector({ detail, loading, error, onInspect, onFocusInGraph }:
               <li key={role}>
                 <span className="relation-role">{role}</span>
                 {node ? (
-                  <Button variant="link" className="cell-link" onClick={() => onInspect("node", node.id)}>
+                  <Button variant="link" onClick={() => onInspect("node", node.id)}>
                     {node.label ?? "(no label)"} · {node.id}
                   </Button>
                 ) : (
-                  <span className="hint-text">unavailable</span>
+                  <span className="inspector-note">unavailable</span>
                 )}
               </li>
             ))}
           </ul>
         </section>
-      )}
+      ) : null}
 
-      {detail.entity === "nodes" && (
+      {detail.entity === "nodes" ? (
         <>
-          <section>
-            <h4>
+          <section className="inspector-section">
+            <h4 className="eyebrow">
               Relationships
-              {detail.degree !== null && <Badge variant="outline" className="count-badge">{detail.degree}</Badge>}
+              {detail.degree !== null ? <span className="eyebrow-count">{detail.degree}</span> : null}
             </h4>
             {detail.edges.length === 0 ? (
-              <p className="hint-text">Nothing connected.</p>
+              <p className="inspector-note">Nothing connected.</p>
             ) : (
               <ul className="relation-list">
                 {detail.edges.map((edge) => {
                   const outgoing = edge.source === detail.id;
                   const other = outgoing ? edge.target : edge.source;
+                  const Direction = outgoing ? ArrowUpRight : ArrowDownLeft;
                   return (
                     <li key={edge.id}>
-                      <span className="relation-direction" aria-label={outgoing ? "outgoing" : "incoming"}>
-                        {outgoing ? "→" : "←"}
-                      </span>
-                      <Button variant="link" className="cell-link" onClick={() => onInspect("edge", edge.id)}>
+                      <Direction
+                        className="relation-direction"
+                        data-direction={outgoing ? "out" : "in"}
+                        aria-label={outgoing ? "outgoing" : "incoming"}
+                        role="img"
+                      />
+                      <Button variant="link" className="relation-edge" onClick={() => onInspect("edge", edge.id)}>
                         {edge.label ?? "(no label)"}
                       </Button>
-                      <Button variant="link" className="cell-link muted" onClick={() => onInspect("node", other)}>
+                      <Button variant="link" className="relation-node" onClick={() => onInspect("node", other)}>
                         {other}
                       </Button>
                     </li>
@@ -113,26 +124,25 @@ export function Inspector({ detail, loading, error, onInspect, onFocusInGraph }:
                 })}
               </ul>
             )}
-            {detail.degree !== null && detail.edges.length < detail.degree && (
-              <p className="hint-text">
+            {detail.degree !== null && detail.edges.length < detail.degree ? (
+              <p className="inspector-note">
                 Showing {detail.edges.length} of {detail.degree}. Raise the cap with{" "}
                 <code>DESCRIBE NODE {detail.id} LIMIT {detail.degree}</code>.
               </p>
-            )}
+            ) : null}
           </section>
 
-          <section>
-            <h4>
-              Neighbours
-              <Badge variant="outline" className="count-badge">{detail.neighbours.length}</Badge>
+          <section className="inspector-section">
+            <h4 className="eyebrow">
+              Neighbours <span className="eyebrow-count">{detail.neighbours.length}</span>
             </h4>
             {detail.neighbours.length === 0 ? (
-              <p className="hint-text">No neighbours.</p>
+              <p className="inspector-note">No neighbours.</p>
             ) : (
               <ul className="relation-list">
                 {detail.neighbours.map((node) => (
                   <li key={node.id}>
-                    <Button variant="link" className="cell-link" onClick={() => onInspect("node", node.id)}>
+                    <Button variant="link" onClick={() => onInspect("node", node.id)}>
                       {node.label ?? "(no label)"} · {node.id}
                     </Button>
                   </li>
@@ -141,7 +151,7 @@ export function Inspector({ detail, loading, error, onInspect, onFocusInGraph }:
             )}
           </section>
         </>
-      )}
+      ) : null}
     </div>
   );
 }

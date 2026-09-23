@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ArrowRight } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { Progress } from "@/components/ui/progress";
+import { BrandMark } from "./BrandMark";
 import "./SplashScreen.css";
 
 type SplashTokenKind =
@@ -164,101 +168,79 @@ export function SplashScreen({ onComplete, minDuration = 2_000 }: Props) {
 
   return (
     <section
-      className={exiting ? "splash-root splash-exit" : "splash-root"}
+      className={exiting ? "splash splash-exit" : "splash"}
       aria-label="Helix Visualizer welcome"
     >
-      <div className="splash-bg-base" aria-hidden="true" />
-      <div className="splash-bg-glow" aria-hidden="true" />
-      <div className="splash-noise" aria-hidden="true" />
+      <div className="splash-grid" aria-hidden="true" />
 
-      <div className="splash-content">
-        <header className="splash-brand splash-reveal splash-reveal-brand">
-          <SplashLogo />
-          <div className="splash-brand-name">
-            <span>Helix</span>
-            <strong>Visualizer</strong>
+      <div className="splash-layout">
+        <header className="splash-intro splash-reveal" style={{ "--reveal-delay": "60ms" } as React.CSSProperties}>
+          <BrandMark size={44} />
+          <h1 className="splash-title">
+            Helix
+            <br />
+            Visualizer
+          </h1>
+          <p className="splash-lede">
+            Query a HelixDB instance in HelixSQL, then read the answer as rows, counts, or the graph itself.
+          </p>
+
+          <div className="splash-progress">
+            <Progress
+              className="splash-progress-track"
+              aria-label="Preparing Helix Visualizer"
+              value={Math.round(progress)}
+            />
+            <div className="splash-progress-row">
+              {ready ? (
+                <>
+                  <Button ref={continueButton} variant="default" size="lg" className="splash-enter" onClick={exit}>
+                    Continue
+                    <ArrowRight />
+                  </Button>
+                  <span className="splash-hint" aria-hidden="true">or press <Kbd>↵</Kbd></span>
+                </>
+              ) : (
+                <span className="splash-status" role="status">
+                  <span className="splash-status-pct" aria-hidden="true">{String(Math.round(progress)).padStart(2, "0")}%</span>
+                  {loadingTask}
+                </span>
+              )}
+            </div>
           </div>
-          <p>Explore connected data with HelixSQL</p>
-          <span className="splash-language-badge">HELIXSQL · READ ONLY</span>
         </header>
 
-        <div className="splash-window splash-reveal splash-reveal-window">
-          <div className="splash-titlebar">
-            <div className="splash-traffic-lights" aria-hidden="true">
-              <span className="red" />
-              <span className="yellow" />
-              <span className="green" />
-            </div>
-            <span>GRAPH QUERY · HELIXSQL</span>
-            <i aria-hidden="true" />
-          </div>
-
+        <figure className="splash-preview splash-reveal" style={{ "--reveal-delay": "200ms" } as React.CSSProperties}>
+          <figcaption className="splash-preview-head">
+            <span>welcome.hsql</span>
+            <span>Read-only</span>
+          </figcaption>
           <div className="splash-editor" aria-label="Example HelixSQL graph query">
             {HELIX_SQL_PREVIEW.map((line, index) => (
               <div
                 className={index < visibleLines ? "splash-code-line visible" : "splash-code-line"}
-                style={{ "--line-index": index } as React.CSSProperties}
                 key={index}
               >
                 <span className="splash-line-number" aria-hidden="true">{index + 1}</span>
                 <code>
                   {line.tokens.map((token, tokenIndex) => (
-                    <span className={`splash-token-${token.kind}`} key={`${token.kind}-${tokenIndex}`}>
+                    <span className={`tok-${token.kind}`} key={`${token.kind}-${tokenIndex}`}>
                       {token.text}
                     </span>
                   ))}
+                  {index === visibleLines - 1 && visibleLines < HELIX_SQL_PREVIEW.length ? (
+                    <span className="splash-cursor" aria-hidden="true" />
+                  ) : null}
                 </code>
               </div>
             ))}
-            <span
-              className={visibleLines >= HELIX_SQL_PREVIEW.length ? "splash-cursor hidden" : "splash-cursor"}
-              aria-hidden="true"
-            />
           </div>
-        </div>
-
-        <div className="splash-progress-region splash-reveal splash-reveal-progress">
-          <Progress
-            className="splash-progress-track"
-            aria-label="Preparing Helix Visualizer"
-            value={Math.round(progress)}
-          />
-
-          {ready ? (
-            <Button ref={continueButton} variant="default" className="splash-enter" onClick={exit}>
-              Continue
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M5 12h14m-6-6 6 6-6 6" />
-              </svg>
-            </Button>
-          ) : (
-            <div className="splash-status" role="status">
-              <span aria-hidden="true" />
-              {loadingTask}
-            </div>
-          )}
-        </div>
+          <div className="splash-preview-foot" aria-hidden="true">
+            <span>{visibleLines >= HELIX_SQL_PREVIEW.length ? "Valid · graph of User nodes" : "Typing…"}</span>
+            <span>{visibleLines} / {HELIX_SQL_PREVIEW.length} lines</span>
+          </div>
+        </figure>
       </div>
     </section>
-  );
-}
-
-function SplashLogo() {
-  return (
-    <svg className="splash-logo" viewBox="0 0 64 64" role="img" aria-label="Helix Visualizer">
-      <defs>
-        <linearGradient id="splash-logo-gradient" x1="8" y1="8" x2="56" y2="56">
-          <stop offset="0" stopColor="#ff6b35" />
-          <stop offset="0.52" stopColor="#875bf7" />
-          <stop offset="1" stopColor="#3a86ff" />
-        </linearGradient>
-      </defs>
-      <rect x="4" y="4" width="56" height="56" rx="15" fill="url(#splash-logo-gradient)" />
-      <path d="M19 39 31 22l14 9-12 14Z" fill="none" stroke="white" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" opacity=".88" />
-      <circle cx="19" cy="39" r="4.5" fill="white" />
-      <circle cx="31" cy="22" r="4.5" fill="white" />
-      <circle cx="45" cy="31" r="4.5" fill="white" />
-      <circle cx="33" cy="45" r="4.5" fill="white" />
-    </svg>
   );
 }

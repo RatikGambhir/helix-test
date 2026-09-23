@@ -1,3 +1,13 @@
+import {
+  Network,
+  PanelLeft,
+  PanelRight,
+  Plug,
+  RotateCw,
+  SquarePen,
+  SquareTerminal,
+  TriangleAlert,
+} from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -19,8 +29,10 @@ import type { Theme } from "./graph/palette";
 import type { GraphData, QueryResult } from "./results";
 import type { Schema } from "./schema";
 import { ConnectionBar, type ConnectionStatus } from "./ui/ConnectionBar";
+import { EmptyState, ErrorNotice } from "./ui/feedback";
 import { Inspector } from "./ui/Inspector";
-import { QueryEditor } from "./ui/QueryEditor";
+import { Pane } from "./ui/Pane";
+import { QueryEditor, type CompileStatus } from "./ui/QueryEditor";
 import { ResultsPanel } from "./ui/ResultsPanel";
 import { SchemaView } from "./ui/SchemaView";
 import { Sidebar } from "./ui/Sidebar";
@@ -32,6 +44,8 @@ const GraphCanvas = lazy(() =>
 
 export type AppView = "query" | "schema" | "graph";
 type OutputTab = "results" | "wire";
+/** Side panels that collapse into drawers on narrow windows. */
+type Drawer = "library" | "inspector";
 
 const INITIAL_QUERY = "QUERY LIMIT 300";
 const THEME_KEY = "helix-visualizer.theme";
@@ -63,6 +77,7 @@ export function App() {
   const [outputTab, setOutputTab] = useState<OutputTab>("results");
   const [run, setRun] = useState<RunState>(IDLE);
   const [history, setHistory] = useState<string[]>([]);
+  const [drawer, setDrawer] = useState<Drawer | null>(null);
 
   const [connection, setConnectionView] = useState<ConnectionView | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>({ kind: "disconnected" });
@@ -119,8 +134,33 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem(THEME_KEY, theme);
+    try {
+      window.localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // Storage can be unavailable; the theme still applies for this session.
+    }
   }, [theme]);
+
+  // A drawer belongs to the view it was opened in, and Escape dismisses it.
+  useEffect(() => setDrawer(null), [view]);
+  useEffect(() => {
+    if (!drawer) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) setDrawer(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [drawer]);
+
+  // While the debounced check is in flight the last verdict stays on screen, so
+  // the status line does not flicker on every keystroke.
+  const compileStatus: CompileStatus = !query.trim()
+    ? { kind: "empty" }
+    : compileState.compiled
+      ? { kind: "valid", summary: compileState.compiled.summary }
+      : compileState.error
+        ? { kind: "invalid" }
+        : { kind: "checking" };
 
   // ---- transport helpers --------------------------------------------------
 
@@ -218,6 +258,7 @@ export function App() {
   const inspect = useCallback(
     async (kind: "node" | "edge", id: string) => {
       setSelectedId(id);
+      setDrawer("inspector");
       setDetailLoading(true);
       setDetailError(null);
       try {
@@ -321,6 +362,14 @@ export function App() {
     setQuery(`QUERY NODES\nWHERE id = ${nodeId}\nTRAVERSE BOTH\nLIMIT 200`);
   }, []);
 
+  const loadQuery = useCallback((nextQuery: string) => {
+    setQuery(nextQuery);
+    setDrawer(null);
+  }, []);
+
+  const openConnection = useCallback(() => setConnectionOpenRequest((value) => value + 1), []);
+  const toggleDrawer = (target: Drawer) => setDrawer((current) => (current === target ? null : target));
+
   // ---- startup ------------------------------------------------------------
 
   const started = useRef(false);
@@ -354,6 +403,58 @@ export function App() {
     return <SplashScreen minDuration={2_000} onComplete={completeSplash} />;
   }
 
+  const connected = status.kind === "connected";
+  const inspectorPane = (
+    <Pane
+      id="inspector-pane"
+      side="inspector"
+      title="Inspector"
+      open={drawer === "inspector"}
+      onClose={() => setDrawer(null)}
+    >
+      <Inspector
+        detail={detail}
+        loading={detailLoading}
+        error={detailError}
+        onInspect={inspect}
+        onFocusInGraph={expandNode}
+      />
+    </Pane>
+  );
+
+  const drawerTools = (
+    <div className="drawer-toggles">
+      {view === "query" ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="drawer-toggle drawer-toggle--library"
+          onClick={() => toggleDrawer("library")}
+          aria-expanded={drawer === "library"}
+          aria-controls="library-pane"
+          aria-label="Library"
+          title="Library"
+        >
+          <PanelLeft strokeWidth={1.75} />
+        </Button>
+      ) : null}
+      {view !== "schema" ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="drawer-toggle drawer-toggle--inspector"
+          onClick={() => toggleDrawer("inspector")}
+          aria-expanded={drawer === "inspector"}
+          aria-controls="inspector-pane"
+          aria-label="Inspector"
+          title="Inspector"
+        >
+          <PanelRight strokeWidth={1.75} />
+        </Button>
+      ) : null}
+    </div>
+  );
+
   return (
     <div className="app">
       <ConnectionBar
@@ -363,6 +464,7 @@ export function App() {
         theme={theme}
         activeView={view}
         openRequest={connectionOpenRequest}
+        tools={drawerTools}
         onSelectView={setView}
         onToggleTheme={() => setTheme((value) => (value === "dark" ? "light" : "dark"))}
         onSave={saveConnection}
@@ -372,117 +474,127 @@ export function App() {
 
       <main className="app-main">
         {view === "query" ? (
-          <div className="app-body query-view">
-            <Sidebar
-              schema={schema}
-              schemaError={schemaError}
-              refreshing={schemaLoading}
-              history={history}
-              onRefreshSchema={refreshSchema}
-              onUseQuery={setQuery}
-            />
+          <div className="workspace workspace--query view-enter">
+            <Pane
+              id="library-pane"
+              side="library"
+              title="Library"
+              open={drawer === "library"}
+              onClose={() => setDrawer(null)}
+            >
+              <Sidebar
+                schema={schema}
+                schemaError={schemaError}
+                refreshing={schemaLoading}
+                history={history}
+                onRefreshSchema={refreshSchema}
+                onUseQuery={loadQuery}
+              />
+            </Pane>
 
-            <section className="workspace">
+            <section className="query-main" aria-label="Query">
               <QueryEditor
                 value={query}
                 onChange={setQuery}
                 onRun={onRun}
                 running={run.running}
+                status={compileStatus}
                 error={compileState.error}
               />
 
               <Tabs className="output" value={outputTab} onValueChange={(value) => setOutputTab(value as OutputTab)}>
-                <TabsList className="tabs">
-                  <TabsTrigger value="results" className="tab">
-                    Results
-                  </TabsTrigger>
-                  <TabsTrigger value="wire" className="tab" disabled={!compileState.compiled}>
-                    Wire format
-                  </TabsTrigger>
+                <div className="strip output-strip">
+                  <TabsList aria-label="Output">
+                    <TabsTrigger value="results">Results</TabsTrigger>
+                    <TabsTrigger value="wire" disabled={!compileState.compiled}>
+                      Wire format
+                    </TabsTrigger>
+                  </TabsList>
 
-                  <span className="tab-status">
-                    {run.running && "running…"}
-                    {!run.running && run.durationMs !== null && `${run.durationMs} ms`}
-                    {!run.running && run.compiled && ` · ${run.compiled.summary}`}
+                  <span className="output-meta" aria-live="polite">
+                    {run.running ? "Running…" : null}
+                    {!run.running && run.durationMs !== null ? <span className="output-meta-time">{run.durationMs} ms</span> : null}
+                    {!run.running && run.compiled ? <span className="output-meta-summary">{run.compiled.summary}</span> : null}
                   </span>
-                </TabsList>
+                </div>
 
-                <TabsContent value="results" className="tab-body">
-                  {run.error && (
-                    <div className="panel-error" role="alert">
-                      <strong>{run.error.message}</strong>
-                      {run.error.detail && <pre>{run.error.detail}</pre>}
-                    </div>
-                  )}
+                <TabsContent value="results" className="output-body">
+                  {run.error ? <ErrorNotice message={run.error.message} detail={run.error.detail} /> : null}
 
                   {!run.error &&
-                    (run.result ? (
-                      <ResultsPanel result={run.result} theme={theme} onInspect={inspect} />
+                    (run.running && !run.result ? (
+                      <EmptyState loading title="Running query" />
+                    ) : run.result ? (
+                      <ResultsPanel
+                        result={run.result}
+                        theme={theme}
+                        onInspect={inspect}
+                        onShowGraph={() => setView("graph")}
+                        onShowInspector={() => setDrawer("inspector")}
+                      />
                     ) : (
-                      <EmptyQueryState connected={status.kind === "connected"} />
+                      <EmptyQueryState connected={connected} onConnect={openConnection} />
                     ))}
                 </TabsContent>
 
-                <TabsContent value="wire" className="tab-body">
-                  {run.error && (
-                    <div className="panel-error" role="alert">
-                      <strong>{run.error.message}</strong>
-                      {run.error.detail && <pre>{run.error.detail}</pre>}
-                    </div>
-                  )}
-                  {compileState.compiled && (
+                <TabsContent value="wire" className="output-body">
+                  {run.error ? <ErrorNotice message={run.error.message} detail={run.error.detail} /> : null}
+                  {compileState.compiled ? (
                     <div className="wire-view">
-                      <p className="hint-text">
-                        Sent to <code>POST /v1/query</code> using the HelixDB Explorer-compatible dynamic query format.
+                      <p>
+                        Sent to <code>POST /v1/query</code> in the HelixDB Explorer-compatible dynamic query format.
                       </p>
                       <pre>{compileState.compiled.transportJson}</pre>
                     </div>
-                  )}
+                  ) : null}
                 </TabsContent>
               </Tabs>
             </section>
 
-            <InspectorPane
-              detail={detail}
-              loading={detailLoading}
-              error={detailError}
-              onInspect={inspect}
-              onFocusInGraph={expandNode}
-            />
+            {inspectorPane}
           </div>
         ) : view === "schema" ? (
           <SchemaView
             schema={schema}
             error={schemaError}
             loading={schemaLoading}
-            connected={status.kind === "connected"}
+            connected={connected}
             onRefresh={refreshSchema}
-            onConnect={() => setConnectionOpenRequest((value) => value + 1)}
+            onConnect={openConnection}
             onUseQuery={(nextQuery) => {
               setQuery(nextQuery);
               setView("query");
             }}
           />
         ) : (
-          <div className="graph-view">
-            <section className="graph-workspace">
-              <header className="view-toolbar">
-                <div>
-                  <h1>Graph</h1>
-                  <p>{graph ? `${graph.nodes.length.toLocaleString()} nodes · ${graph.edges.length.toLocaleString()} edges` : "Explore the current database as a network"}</p>
+          <div className="workspace workspace--graph view-enter">
+            <section className="graph-main" aria-labelledby="graph-title">
+              <header className="view-header">
+                <div className="view-title">
+                  <h1 id="graph-title">Graph</h1>
+                  <p>
+                    {graph
+                      ? `${graph.nodes.length.toLocaleString()} nodes · ${graph.edges.length.toLocaleString()} edges`
+                      : "The connected database, drawn as a network"}
+                  </p>
                 </div>
-                <div className="view-toolbar-actions">
+                <div className="view-actions">
                   {status.kind !== "disconnected" ? (
-                    <Button variant="outline" onClick={refreshCurrentGraph} disabled={graphLoading}>
-                      {graphLoading ? "Refreshing…" : "Refresh"}
+                    <Button variant="ghost" onClick={refreshCurrentGraph} disabled={graphLoading}>
+                      <RotateCw className={graphLoading ? "is-spinning" : undefined} />
+                      {graphLoading ? "Refreshing" : "Refresh"}
                     </Button>
                   ) : null}
-                  <Button variant="outline" onClick={() => setView("query")}>Edit graph query</Button>
+                  <Button variant="outline" onClick={() => setView("query")}>
+                    <SquarePen />
+                    Edit query
+                  </Button>
                 </div>
               </header>
+
               <div className="graph-stage">
                 {graph && graph.nodes.length > 0 ? (
-                  <Suspense fallback={<div className="empty-state"><span className="loading-ring" />Loading graph…</div>}>
+                  <Suspense fallback={<EmptyState loading title="Preparing canvas" />}>
                     <GraphCanvas
                       graph={graph}
                       theme={theme}
@@ -492,44 +604,40 @@ export function App() {
                     />
                   </Suspense>
                 ) : graphLoading ? (
-                  <div className="empty-state graph-empty" role="status">
-                    <span className="loading-ring" aria-hidden="true" />
-                    <h2>Syncing graph data</h2>
-                    <p>Loading the current nodes and relationships from HelixDB…</p>
-                  </div>
+                  <EmptyState loading title="Syncing graph data">
+                    Loading the current nodes and relationships from HelixDB…
+                  </EmptyState>
                 ) : graphError ? (
-                  <div className="empty-state graph-empty graph-error" role="alert">
-                    <span className="empty-icon" aria-hidden="true">!</span>
-                    <h2>Couldn’t load the graph</h2>
-                    <p>{graphError}</p>
-                    <Button variant="default" className="primary" onClick={refreshCurrentGraph}>Retry</Button>
-                  </div>
-                ) : status.kind !== "connected" ? (
-                  <div className="empty-state graph-empty">
-                    <span className="empty-icon" aria-hidden="true">⌘</span>
-                    <h2>Connect to explore your graph</h2>
-                    <p>Choose a local, remote, or cloud HelixDB instance. The current graph will load automatically.</p>
-                    <Button variant="default" className="primary" onClick={() => setConnectionOpenRequest((value) => value + 1)}>Connect Now</Button>
-                  </div>
+                  <EmptyState
+                    icon={TriangleAlert}
+                    tone="danger"
+                    title="Couldn’t load the graph"
+                    action={<Button variant="default" onClick={refreshCurrentGraph}>Retry</Button>}
+                  >
+                    {graphError}
+                  </EmptyState>
+                ) : !connected ? (
+                  <EmptyState
+                    icon={Plug}
+                    title="Connect to explore your graph"
+                    action={<Button variant="default" onClick={openConnection}>Connect</Button>}
+                  >
+                    Choose a local, remote, or cloud HelixDB instance. The current graph loads automatically.
+                  </EmptyState>
                 ) : (
-                  <div className="empty-state graph-empty">
-                    <span className="empty-icon" aria-hidden="true">⌘</span>
-                    <h2>No graph data found</h2>
-                    <p>The connected instance did not return any nodes or relationships.</p>
-                    <Button variant="default" className="primary" onClick={refreshCurrentGraph}>Refresh</Button>
-                  </div>
+                  <EmptyState
+                    icon={Network}
+                    title="No graph data found"
+                    action={<Button variant="outline" onClick={refreshCurrentGraph}>Refresh</Button>}
+                  >
+                    The connected instance did not return any nodes or relationships.
+                  </EmptyState>
                 )}
               </div>
-              {graph && <GraphCaveats graph={graph} />}
+              {graph ? <GraphCaveats graph={graph} /> : null}
             </section>
 
-            <InspectorPane
-              detail={detail}
-              loading={detailLoading}
-              error={detailError}
-              onInspect={inspect}
-              onFocusInGraph={expandNode}
-            />
+            {inspectorPane}
           </div>
         )}
       </main>
@@ -537,24 +645,25 @@ export function App() {
   );
 }
 
-function InspectorPane(props: React.ComponentProps<typeof Inspector>) {
-  return (
-    <aside className="detail-pane">
-      <header className="section-header">
-        <h2>Inspector</h2>
-      </header>
-      <Inspector {...props} />
-    </aside>
-  );
-}
-
-function EmptyQueryState({ connected }: { connected: boolean }) {
-  return (
-    <div className="empty-state">
-      <span className="empty-icon" aria-hidden="true">›_</span>
-      <h2>{connected ? "Ready to explore" : "Connect to get started"}</h2>
-      <p>{connected ? "Run the query above to see structured results." : "Use Connection in the toolbar to choose a local, remote, or cloud instance."}</p>
-    </div>
+function EmptyQueryState({ connected, onConnect }: { connected: boolean; onConnect: () => void }) {
+  return connected ? (
+    <EmptyState icon={SquareTerminal} title="Ready when you are">
+      Write a query above or pick one from the library, then run it with the Run button or{" "}
+      <kbd>{navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+Enter</kbd>.
+    </EmptyState>
+  ) : (
+    <EmptyState
+      icon={Plug}
+      title="Connect to get started"
+      action={
+        <Button variant="outline" onClick={onConnect}>
+          <Plug />
+          Connect
+        </Button>
+      }
+    >
+      Point the visualizer at a local, remote, or cloud HelixDB instance. You can write queries in the meantime.
+    </EmptyState>
   );
 }
 
@@ -569,11 +678,21 @@ function GraphCaveats({ graph }: { graph: GraphData }) {
     );
   }
   if (notes.length === 0) return null;
-  return <p className="graph-caveats">Note: {notes.join("; ")}.</p>;
+  return (
+    <p className="graph-caveats">
+      <TriangleAlert aria-hidden="true" />
+      <span>{notes.join("; ")}.</span>
+    </p>
+  );
 }
 
 function readInitialTheme(): Theme {
-  const saved = window.localStorage.getItem(THEME_KEY);
+  let saved: string | null = null;
+  try {
+    saved = window.localStorage.getItem(THEME_KEY);
+  } catch {
+    // Fall through to the system preference.
+  }
   if (saved === "light" || saved === "dark") return saved;
   return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }

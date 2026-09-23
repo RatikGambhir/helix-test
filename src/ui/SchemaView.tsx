@@ -1,12 +1,21 @@
-import { useMemo, useState } from "react";
+import {
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Plug,
+  RotateCw,
+  Search,
+  SearchX,
+  Table2,
+  TriangleAlert,
+  Waypoints,
+  X,
+  Zap,
+} from "lucide-react";
+import { useId, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   filterSchemaEntries,
   formatSchemaValue,
@@ -14,6 +23,7 @@ import {
   type Schema,
   type SchemaLabel,
 } from "../schema";
+import { EmptyState } from "./feedback";
 
 type SchemaCategory = "nodes" | "edges" | "vectors";
 
@@ -45,14 +55,15 @@ export function SchemaView({
   const [category, setCategory] = useState<SchemaCategory>("nodes");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const searchId = useId();
 
-  const allEntries = category === "nodes"
-    ? schema?.nodeLabels ?? []
-    : category === "edges"
-      ? schema?.edgeLabels ?? []
-      : [];
+  const allEntries = useMemo(
+    () => (category === "nodes" ? schema?.nodeLabels ?? [] : category === "edges" ? schema?.edgeLabels ?? [] : []),
+    [category, schema],
+  );
   const entries = useMemo(() => filterSchemaEntries(allEntries, search), [allEntries, search]);
-  const allVisibleExpanded = entries.length > 0 && entries.every((entry) => expanded.has(entry.label));
+  const allVisibleExpanded = entries.length > 0 && entries.every((entry) => expanded.has(key(category, entry)));
+  const maxCount = Math.max(1, ...allEntries.map((entry) => entry.count));
 
   const countFor = (id: SchemaCategory) => {
     if (id === "nodes") return schema?.nodeLabels.length ?? 0;
@@ -60,11 +71,11 @@ export function SchemaView({
     return 0;
   };
 
-  const toggleExpanded = (label: string) => {
+  const toggleExpanded = (entryKey: string) => {
     setExpanded((current) => {
       const next = new Set(current);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
+      if (next.has(entryKey)) next.delete(entryKey);
+      else next.add(entryKey);
       return next;
     });
   };
@@ -72,224 +83,231 @@ export function SchemaView({
   const toggleAll = () => {
     setExpanded((current) => {
       const next = new Set(current);
-      if (allVisibleExpanded) entries.forEach((entry) => next.delete(entry.label));
-      else entries.forEach((entry) => next.add(entry.label));
+      for (const entry of entries) {
+        if (allVisibleExpanded) next.delete(key(category, entry));
+        else next.add(key(category, entry));
+      }
       return next;
     });
   };
 
+  const showLedger = !error && connected && schema && category !== "vectors" && entries.length > 0;
+
   return (
-    <section className="schema-view" aria-labelledby="schema-page-title">
-      <h1 id="schema-page-title" className="visually-hidden">Schema</h1>
+    <section className="schema-view view-enter" aria-labelledby="schema-page-title">
+      <header className="view-header">
+        <div className="view-title">
+          <h1 id="schema-page-title">Schema</h1>
+          <p>
+            {schema
+              ? `Labels sampled from up to ${schema.sample.toLocaleString()} ${category === "vectors" ? "entities" : category}`
+              : "Node and edge labels discovered on the instance"}
+          </p>
+        </div>
 
-      <header className="schema-toolbar">
-        <Label className="schema-search">
-          <SchemaIcon name="search" />
-          <span className="visually-hidden">Search schema labels</span>
-          <Input
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={`Search ${category}…`}
-          />
-          {search ? (
-            <Button variant="ghost" size="icon-sm" onClick={() => setSearch("")} aria-label="Clear search">×</Button>
-          ) : null}
-        </Label>
+        <div className="schema-controls">
+          <div className="segmented" role="group" aria-label="Schema category">
+            {CATEGORIES.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                className="segmented-item"
+                aria-pressed={category === item.id}
+                onClick={() => {
+                  setCategory(item.id);
+                  setSearch("");
+                }}
+              >
+                {item.label}
+                <span className="segmented-count">{countFor(item.id)}</span>
+              </button>
+            ))}
+          </div>
 
-        <nav className="schema-categories" aria-label="Schema categories">
-          {CATEGORIES.map((item) => (
-            <Button
-              variant="ghost"
-              key={item.id}
-              className={category === item.id ? `schema-category ${item.id} active` : `schema-category ${item.id}`}
-              aria-current={category === item.id ? "page" : undefined}
-              onClick={() => {
-                setCategory(item.id);
-                setSearch("");
-              }}
-            >
-              <SchemaIcon name={item.id} />
-              <span>{item.label}</span>
-              <strong>{countFor(item.id)}</strong>
-            </Button>
-          ))}
-        </nav>
+          <div className="search-field">
+            <Search aria-hidden="true" />
+            <label htmlFor={searchId} className="sr-only">Search {category}</label>
+            <Input
+              id={searchId}
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Escape" && search) { event.stopPropagation(); setSearch(""); } }}
+              placeholder={`Filter ${category}`}
+              disabled={category === "vectors"}
+            />
+            {search ? (
+              <Button variant="ghost" size="icon-sm" onClick={() => setSearch("")} aria-label="Clear filter">
+                <X />
+              </Button>
+            ) : null}
+          </div>
+        </div>
 
-        <div className="schema-toolbar-spacer" />
-        <div className="schema-actions">
-          <Button variant="outline" onClick={toggleAll} disabled={entries.length === 0}>
-            <SchemaIcon name="expand" />
-            {allVisibleExpanded ? "Collapse" : "Expand"}
+        <div className="view-actions">
+          <Button variant="ghost" onClick={toggleAll} disabled={!showLedger}>
+            {allVisibleExpanded ? <ChevronsDownUp /> : <ChevronsUpDown />}
+            {allVisibleExpanded ? "Collapse all" : "Expand all"}
           </Button>
-          <Separator orientation="vertical" />
           <Button variant="outline" onClick={onRefresh} disabled={!connected || loading}>
-            <SchemaIcon name="refresh" spinning={loading} />
-            {loading ? "Refreshing…" : "Refresh"}
+            <RotateCw className={loading ? "is-spinning" : undefined} />
+            {loading ? "Refreshing" : "Refresh"}
           </Button>
         </div>
       </header>
 
-      <div className="schema-content">
-        {schema ? (
-          <p className="schema-sample-note">
-            Labels are derived from a sample of up to {schema.sample.toLocaleString()} {category === "vectors" ? "entities" : category}.
-          </p>
-        ) : null}
-
+      <div className="schema-body">
         {error ? (
-          <div className="schema-page-state error" role="alert">
-            <span className="empty-icon" aria-hidden="true">!</span>
-            <h2>Couldn’t load the schema</h2>
-            <p>{error}</p>
-            <Button variant="default" className="primary" onClick={onRefresh}>Try again</Button>
-          </div>
+          <EmptyState
+            icon={TriangleAlert}
+            tone="danger"
+            title="Couldn’t load the schema"
+            action={<Button variant="default" onClick={onRefresh}>Try again</Button>}
+          >
+            {error}
+          </EmptyState>
         ) : !connected ? (
-          <div className="schema-page-state">
-            <span className="empty-icon" aria-hidden="true"><SchemaIcon name="nodes" /></span>
-            <h2>Connect to inspect your schema</h2>
-            <p>Choose a local, remote, or cloud HelixDB instance to discover its node and edge labels.</p>
-            <Button variant="default" className="primary" onClick={onConnect}>Connect Now</Button>
-          </div>
+          <EmptyState
+            icon={Plug}
+            title="Connect to inspect your schema"
+            action={<Button variant="default" onClick={onConnect}>Connect</Button>}
+          >
+            Choose a local, remote, or cloud HelixDB instance to discover its node and edge labels.
+          </EmptyState>
         ) : loading && !schema ? (
-          <div className="schema-page-state" role="status">
-            <span className="loading-ring" aria-hidden="true" />
-            <h2>Reading schema</h2>
-            <p>Sampling labels from the connected instance…</p>
-          </div>
+          <EmptyState loading title="Reading schema">
+            Sampling labels from the connected instance…
+          </EmptyState>
         ) : category === "vectors" ? (
-          <div className="schema-page-state">
-            <span className="empty-icon vector" aria-hidden="true"><SchemaIcon name="vectors" /></span>
-            <h2>No vector indexes discovered</h2>
-            <p>Vector index metadata is not exposed by the current Explorer query interface.</p>
-          </div>
-        ) : entries.length > 0 ? (
-          <div className="schema-card-grid" aria-live="polite">
+          <EmptyState icon={Zap} title="No vector indexes discovered">
+            Vector index metadata is not exposed by the current Explorer query interface.
+          </EmptyState>
+        ) : showLedger ? (
+          <div className="ledger" role="list" aria-label={`${category} labels`} aria-busy={loading}>
+            <div className="ledger-columns" aria-hidden="true">
+              <span>Label</span>
+              <span>Observed</span>
+              <span className="ledger-share-heading">Share of sample</span>
+              <span>Fields</span>
+              <span />
+            </div>
             {entries.map((entry) => (
-              <SchemaCard
+              <LedgerRow
                 key={entry.label}
                 category={category}
                 entry={entry}
-                sample={schema?.sample ?? 0}
-                expanded={expanded.has(entry.label)}
-                onToggle={() => toggleExpanded(entry.label)}
+                share={entry.count / maxCount}
+                expanded={expanded.has(key(category, entry))}
+                onToggle={() => toggleExpanded(key(category, entry))}
                 onUseQuery={onUseQuery}
               />
             ))}
           </div>
         ) : (
-          <div className="schema-page-state compact">
-            <span className="empty-icon" aria-hidden="true"><SchemaIcon name="search" /></span>
-            <h2>{search ? "No matching labels" : `No ${category} discovered`}</h2>
-            <p>{search ? `Nothing in this schema matches “${search.trim()}”.` : "Refresh to sample the connected instance again."}</p>
-          </div>
+          <EmptyState icon={SearchX} title={search ? "No matching labels" : `No ${category} discovered`}>
+            {search ? `Nothing in this schema matches “${search.trim()}”.` : "Refresh to sample the connected instance again."}
+          </EmptyState>
         )}
-
-        {loading && schema ? <div className="schema-loading-overlay" role="status"><span className="loading-ring" />Refreshing schema…</div> : null}
       </div>
     </section>
   );
 }
 
-function SchemaCard({
+function key(category: SchemaCategory, entry: SchemaLabel) {
+  return `${category}:${entry.label}`;
+}
+
+function LedgerRow({
   category,
   entry,
-  sample,
+  share,
   expanded,
   onToggle,
   onUseQuery,
 }: {
   category: Exclude<SchemaCategory, "vectors">;
   entry: SchemaLabel;
-  sample: number;
+  share: number;
   expanded: boolean;
   onToggle: () => void;
   onUseQuery: (query: string) => void;
 }) {
+  const detailId = useId();
   return (
-    <Card className={expanded ? `schema-card ${category} expanded` : `schema-card ${category}`}>
-      <Button variant="ghost" className="schema-card-summary" onClick={onToggle} aria-expanded={expanded}>
-        <span className="schema-card-icon" aria-hidden="true"><SchemaIcon name={category} /></span>
-        <strong title={entry.label}>{entry.label}</strong>
-        <Badge variant="outline" className="schema-card-count" title="Observed entities">{entry.count.toLocaleString()}</Badge>
-        <SchemaIcon name="chevron" />
-      </Button>
+    <div className="ledger-row" role="listitem" data-expanded={expanded || undefined}>
+      <button
+        type="button"
+        className="ledger-summary"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-controls={detailId}
+      >
+        <span className="ledger-label" title={entry.label}>{entry.label}</span>
+        <span className="ledger-count">{entry.count.toLocaleString()}</span>
+        <span className="ledger-share" aria-hidden="true">
+          <span style={{ width: `${Math.max(share * 100, 1)}%` }} />
+        </span>
+        <span className="ledger-fields">{entry.fieldError ? "—" : entry.fields.length}</span>
+        <ChevronRight className="ledger-chevron" aria-hidden="true" />
+      </button>
+
       {expanded ? (
-        <div className="schema-card-detail">
-          <dl>
-            <div><dt>Kind</dt><dd>{category === "nodes" ? "Node label" : "Edge label"}</dd></div>
-            <div><dt>Observed</dt><dd>{entry.count.toLocaleString()} in sample</dd></div>
-            <div><dt>Sample cap</dt><dd>{sample.toLocaleString()}</dd></div>
-          </dl>
-          <section className="schema-property-section">
-            <header>
-              <strong>Properties</strong>
-              <span>{entry.fields.length} field{entry.fields.length === 1 ? "" : "s"} · {entry.fieldSample} sampled</span>
-            </header>
-            {entry.fieldError ? (
-              <p className="schema-field-message error">Couldn’t sample property values: {entry.fieldError}</p>
-            ) : entry.fields.length === 0 ? (
-              <p className="schema-field-message">No stored properties found in the sampled {category}.</p>
-            ) : (
-              <div className="schema-property-scroll">
-                <Table className="schema-property-table">
-                  <TableHeader>
-                    <TableRow><TableHead>Property</TableHead><TableHead>Sample value</TableHead></TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {entry.fields.map((field) => (
-                      <TableRow key={field.name}>
-                        <TableHead scope="row">
-                          <code title={field.name}>{field.name}</code>
-                          <small>{field.types.join(" | ")}</small>
-                        </TableHead>
-                        <TableCell>
-                          <div className="schema-field-values">
-                            {field.values.map((value, index) => {
-                              const formatted = formatSchemaValue(value);
-                              return <code key={`${index}-${formatted}`} title={schemaValueText(value)}>{formatted}</code>;
-                            })}
-                          </div>
-                          <small>{field.presentOn}/{entry.fieldSample} sampled</small>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </section>
-          <Button variant="outline" onClick={() => onUseQuery(entry.browseQuery)}>Open in Query</Button>
+        <div className="ledger-detail" id={detailId}>
+          <div className="ledger-detail-head">
+            <p>
+              {category === "nodes" ? "Node label" : "Edge label"} · {entry.fields.length} field
+              {entry.fields.length === 1 ? "" : "s"} across {entry.fieldSample} sampled{" "}
+              {category === "nodes" ? "node" : "edge"}{entry.fieldSample === 1 ? "" : "s"}
+            </p>
+            <div className="ledger-actions">
+              <Button variant="outline" size="sm" onClick={() => onUseQuery(entry.browseQuery)} title={entry.browseQuery}>
+                <Table2 />
+                Browse rows
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => onUseQuery(entry.graphQuery)} title={entry.graphQuery}>
+                <Waypoints />
+                Graph query
+              </Button>
+            </div>
+          </div>
+
+          {entry.fieldError ? (
+            <p className="ledger-message" data-tone="danger">Couldn’t sample property values: {entry.fieldError}</p>
+          ) : entry.fields.length === 0 ? (
+            <p className="ledger-message">No stored properties found in the sampled {category}.</p>
+          ) : (
+            <div className="table-scroll">
+              <table className="data-table field-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Property</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Sample values</th>
+                    <th scope="col" className="is-numeric">Present</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entry.fields.map((field) => (
+                    <tr key={field.name}>
+                      <th scope="row"><code title={field.name}>{field.name}</code></th>
+                      <td><span className="field-type">{field.types.join(" | ")}</span></td>
+                      <td>
+                        <span className="field-values">
+                          {field.values.map((value, index) => {
+                            const formatted = formatSchemaValue(value);
+                            return <code key={`${index}-${formatted}`} title={schemaValueText(value)}>{formatted}</code>;
+                          })}
+                        </span>
+                      </td>
+                      <td className="is-numeric">{field.presentOn}/{entry.fieldSample}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       ) : null}
-    </Card>
+    </div>
   );
-}
-
-function SchemaIcon({
-  name,
-  spinning = false,
-}: {
-  name: SchemaCategory | "search" | "expand" | "refresh" | "chevron";
-  spinning?: boolean;
-}) {
-  const common = {
-    width: 20,
-    height: 20,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.9,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-    className: spinning ? "spinning" : undefined,
-  };
-  if (name === "nodes") return <svg {...common}><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>;
-  if (name === "edges") return <svg {...common}><circle cx="6" cy="12" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="m7.8 11.1 8.4-4.2m-8.4 6 8.4 4.2"/></svg>;
-  if (name === "vectors") return <svg {...common}><path d="m13 2-7 12h6l-1 8 7-12h-6l1-8Z"/></svg>;
-  if (name === "search") return <svg {...common}><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4 4"/></svg>;
-  if (name === "expand") return <svg {...common}><path d="m8 3-4 4 4 4M4 7h7m5 6 4 4-4 4m4-4h-7"/></svg>;
-  if (name === "refresh") return <svg {...common}><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.2 10A7 7 0 0 0 6.1 6.1L4 8m2 6a7 7 0 0 0 11.9 3.9L20 16"/></svg>;
-  return <svg {...common}><path d="m9 6 6 6-6 6"/></svg>;
 }

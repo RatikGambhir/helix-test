@@ -8,11 +8,11 @@ function Tabs({ className, ...props }: React.ComponentProps<typeof TabsPrimitive
 }
 
 function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
-  return <TabsPrimitive.List data-slot="tabs-list" className={cn("inline-flex items-center", className)} {...props} />;
+  return <TabsPrimitive.List data-slot="tabs-list" className={cn("tabs-list", className)} {...props} />;
 }
 
 function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
-  return <TabsPrimitive.Trigger data-slot="tabs-trigger" className={cn("inline-flex items-center justify-center whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent)_24%,transparent)] disabled:pointer-events-none disabled:opacity-50", className)} {...props} />;
+  return <TabsPrimitive.Trigger data-slot="tabs-trigger" className={cn("tabs-trigger", className)} {...props} />;
 }
 
 function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {

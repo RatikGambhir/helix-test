@@ -1,7 +1,7 @@
+import { ArrowDown, ArrowUp, ChevronsUpDown, PanelRight, Waypoints } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { legendColour, type Theme } from "../graph/palette";
 import { stringify, type LabelCount, type QueryResult, type Row } from "../results";
@@ -11,43 +11,40 @@ interface Props {
   theme: Theme;
   /** Clicking an id in the table focuses that entity. */
   onInspect: (kind: "node" | "edge", id: string) => void;
+  onShowGraph: () => void;
+  onShowInspector: () => void;
 }
 
 /** Renders whichever shape the query came back as. */
-export function ResultsPanel({ result, theme, onInspect }: Props) {
+export function ResultsPanel({ result, theme, onInspect, onShowGraph, onShowInspector }: Props) {
   switch (result.kind) {
     case "rows":
       return <RowTable columns={result.columns} rows={result.rows} onInspect={onInspect} />;
     case "count":
       return (
-        <Card className="stat-tile">
-          <span className="stat-value">{result.value.toLocaleString()}</span>
-          <span className="stat-caption">matching entities</span>
-        </Card>
+        <div className="figures">
+          <Figure value={result.value} caption="matching entities" />
+        </div>
       );
     case "groupCount":
-      return <CountBars title={`by ${result.by}`} groups={result.groups} theme={theme} />;
+      return <CountBars title={`Count by ${result.by}`} groups={result.groups} theme={theme} />;
     case "labels":
       return (
-        <div className="split-panels">
-          {result.nodes && <CountBars title="Node labels" groups={result.nodes} theme={theme} />}
-          {result.edges && <CountBars title="Edge labels" groups={result.edges} theme={theme} />}
+        <div className="chart-pair">
+          {result.nodes ? <CountBars title="Node labels" groups={result.nodes} theme={theme} /> : null}
+          {result.edges ? <CountBars title="Edge labels" groups={result.edges} theme={theme} /> : null}
         </div>
       );
     case "stats":
       return (
-        <div className="stats-layout">
-          <div className="stat-row">
-            <Card className="stat-tile">
-              <span className="stat-value">{result.nodeCount.toLocaleString()}</span>
-              <span className="stat-caption">nodes</span>
-            </Card>
-            <Card className="stat-tile">
-              <span className="stat-value">{result.edgeCount.toLocaleString()}</span>
-              <span className="stat-caption">edges</span>
-            </Card>
+        <div className="stats">
+          <div className="figures">
+            <Figure value={result.nodeCount} caption="nodes" />
+            <Figure value={result.edgeCount} caption="edges" />
+            <Figure value={result.nodeLabels.length} caption="node labels" />
+            <Figure value={result.edgeLabels.length} caption="edge labels" />
           </div>
-          <div className="split-panels">
+          <div className="chart-pair">
             <CountBars title="Node labels" groups={result.nodeLabels} theme={theme} />
             <CountBars title="Edge labels" groups={result.edgeLabels} theme={theme} />
           </div>
@@ -55,14 +52,37 @@ export function ResultsPanel({ result, theme, onInspect }: Props) {
       );
     case "graph":
       return (
-        <p className="hint-text">
-          {result.graph.nodes.length.toLocaleString()} nodes and{" "}
-          {result.graph.edges.length.toLocaleString()} edges are drawn in the Graph tab.
-        </p>
+        <div className="result-note">
+          <p>
+            <strong>{result.graph.nodes.length.toLocaleString()}</strong> nodes and{" "}
+            <strong>{result.graph.edges.length.toLocaleString()}</strong> edges are drawn in the Graph workspace.
+          </p>
+          <Button variant="outline" size="sm" onClick={onShowGraph}>
+            <Waypoints />
+            Open graph
+          </Button>
+        </div>
       );
     case "describe":
-      return <p className="hint-text">See the inspector on the right.</p>;
+      return (
+        <div className="result-note">
+          <p>Details for this entity are in the Inspector.</p>
+          <Button variant="outline" size="sm" className="show-inspector" onClick={onShowInspector}>
+            <PanelRight />
+            Open inspector
+          </Button>
+        </div>
+      );
   }
+}
+
+function Figure({ value, caption }: { value: number; caption: string }) {
+  return (
+    <div className="figure">
+      <span className="figure-value">{value.toLocaleString()}</span>
+      <span className="figure-caption">{caption}</span>
+    </div>
+  );
 }
 
 function RowTable({
@@ -85,105 +105,118 @@ function RowTable({
   }, [rows, sort]);
 
   if (rows.length === 0) {
-    return <p className="hint-text">No rows matched.</p>;
+    return <p className="result-note">No rows matched.</p>;
   }
 
   const isEdgeTable = columns.includes("source") && columns.includes("target");
 
   return (
-    <div className="table-scroll">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {columns.map((column) => (
-              <TableHead key={column}>
-                <Button
-                  variant="ghost"
-                  onClick={() =>
-                    setSort((current) =>
-                      current?.column === column
-                        ? { column, descending: !current.descending }
-                        : { column, descending: false },
-                    )
-                  }
-                >
-                  {column}
-                  {sort?.column === column && <span aria-hidden="true">{sort.descending ? " ↓" : " ↑"}</span>}
-                </Button>
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sorted.map((row, index) => (
-            <TableRow key={index}>
+    <div className="row-results">
+      <p className="row-results-caption">
+        {rows.length.toLocaleString()} row{rows.length === 1 ? "" : "s"}
+        {sort ? ` · sorted by ${sort.column} on screen only` : ""}
+      </p>
+      <div className="table-scroll">
+        <Table>
+          <TableHeader>
+            <TableRow>
               {columns.map((column) => {
-                const value = row[column];
-                const text = stringify(value);
-                const linkable =
-                  (column === "id" || column === "source" || column === "target") && text.length > 0;
+                const active = sort?.column === column;
+                const SortIcon = !active ? ChevronsUpDown : sort.descending ? ArrowDown : ArrowUp;
                 return (
-                  <TableCell key={column} className={typeof value === "number" || typeof value === "bigint" ? "numeric" : undefined}>
-                    {linkable ? (
-                      <Button
-                        variant="link"
-                        className="cell-link"
-                        onClick={() =>
-                          onInspect(column === "id" && isEdgeTable ? "edge" : "node", text)
-                        }
-                        title="Inspect this entity"
-                      >
-                        {text}
-                      </Button>
-                    ) : (
-                      text
-                    )}
-                  </TableCell>
+                  <TableHead
+                    key={column}
+                    aria-sort={active ? (sort.descending ? "descending" : "ascending") : undefined}
+                  >
+                    <button
+                      type="button"
+                      className="sort-button"
+                      data-active={active || undefined}
+                      onClick={() =>
+                        setSort((current) =>
+                          current?.column === column
+                            ? { column, descending: !current.descending }
+                            : { column, descending: false },
+                        )
+                      }
+                    >
+                      {column}
+                      <SortIcon aria-hidden="true" />
+                    </button>
+                  </TableHead>
                 );
               })}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {sorted.map((row, index) => (
+              <TableRow key={index}>
+                {columns.map((column) => {
+                  const value = row[column];
+                  const text = stringify(value);
+                  const linkable =
+                    (column === "id" || column === "source" || column === "target") && text.length > 0;
+                  const numeric = typeof value === "number" || typeof value === "bigint";
+                  return (
+                    <TableCell key={column} className={numeric ? "is-numeric" : undefined} title={text.length > 40 ? text : undefined}>
+                      {linkable ? (
+                        <Button
+                          variant="link"
+                          onClick={() =>
+                            onInspect(column === "id" && isEdgeTable ? "edge" : "node", text)
+                          }
+                          title="Inspect this entity"
+                        >
+                          {text}
+                        </Button>
+                      ) : typeof value === "boolean" ? (
+                        <span className="cell-bool">{text}</span>
+                      ) : (
+                        text
+                      )}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }
 
 /** A horizontal bar chart — the right form for comparing label magnitudes. */
 function CountBars({ title, groups, theme }: { title: string; groups: LabelCount[]; theme: Theme }) {
-  if (groups.length === 0) {
-    return (
-      <div className="count-bars">
-        <h3>{title}</h3>
-        <p className="hint-text">Nothing to show.</p>
-      </div>
-    );
-  }
-  const max = Math.max(...groups.map((group) => group.count));
+  const max = Math.max(1, ...groups.map((group) => group.count));
   return (
-    <div className="count-bars">
-      <h3>{title}</h3>
-      <ul>
-        {groups.map((group, index) => (
-          <li key={group.label}>
-            <span className="bar-label" title={group.label}>
-              {group.label}
-            </span>
-            <span className="bar-track">
-              <span
-                className="bar-fill"
-                style={{
-                  width: `${Math.max((group.count / max) * 100, 1.5)}%`,
-                  // Colour is decorative here; the value is always written out.
-                  background: legendColour({ label: group.label, count: group.count, slot: index < 8 ? index : null }, theme),
-                }}
-              />
-            </span>
-            <span className="bar-value">{group.count.toLocaleString()}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <section className="count-bars">
+      <h3 className="eyebrow">{title}</h3>
+      {groups.length === 0 ? (
+        <p className="result-note">Nothing to show.</p>
+      ) : (
+        <ul>
+          {groups.map((group, index) => (
+            <li key={group.label}>
+              <span className="bar-label" title={group.label}>
+                {group.label}
+              </span>
+              <span className="bar-track" aria-hidden="true">
+                <span
+                  className="bar-fill"
+                  style={{
+                    width: `${Math.max((group.count / max) * 100, 1.5)}%`,
+                    // Colour is decorative here; the value is always written out.
+                    background: legendColour({ label: group.label, count: group.count, slot: index < 8 ? index : null }, theme),
+                  }}
+                />
+              </span>
+              <span className="bar-value">{group.count.toLocaleString()}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

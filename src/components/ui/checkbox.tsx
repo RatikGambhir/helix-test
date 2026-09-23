@@ -12,13 +12,13 @@ const Checkbox = React.forwardRef<
     ref={ref}
     data-slot="checkbox"
     className={cn(
-      "peer size-4 shrink-0 rounded-[4px] border border-[var(--border-strong)] bg-[var(--surface-elevated)] shadow-sm outline-none transition-[background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent)_22%,transparent)] disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-[var(--accent)] data-[state=checked]:bg-[var(--accent)] data-[state=checked]:text-white",
+      "peer grid size-4 shrink-0 cursor-pointer place-items-center rounded-[3px] border border-line-strong bg-canvas outline-none transition-[background-color,border-color] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal-line disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-signal data-[state=checked]:bg-signal data-[state=checked]:text-signal-ink",
       className,
     )}
     {...props}
   >
     <CheckboxPrimitive.Indicator data-slot="checkbox-indicator" className="grid place-items-center text-current">
-      <CheckIcon className="size-3" strokeWidth={2.5} />
+      <CheckIcon className="size-3" strokeWidth={3} />
     </CheckboxPrimitive.Indicator>
   </CheckboxPrimitive.Root>
 ));
