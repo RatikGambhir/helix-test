@@ -3,23 +3,21 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  BackendError,
+  compileQuery,
   getConnection,
   isDesktop,
-  parseResponseBody,
+  loadSchema,
   runQuery,
   setConnection,
   testConnection,
-  TransportError,
+  type CompiledQuery,
   type ConnectionView,
 } from "./client";
 import type { GraphSelectionEvent } from "./graph/GraphCanvas";
 import type { Theme } from "./graph/palette";
-import { HqlError, type Statement } from "./hql/ast";
-import { compile, type CompiledQuery } from "./hql/compiler";
-import { compileLegacy } from "./hql/legacy";
-import { parse } from "./hql/parser";
-import { readResult, ResultError, type GraphData, type LabelCount, type QueryResult } from "./results";
-import { inferSchemaFields, schemaQueryFor, type Schema, type SchemaLabel } from "./schema";
+import type { GraphData, QueryResult } from "./results";
+import type { Schema } from "./schema";
 import { ConnectionBar, type ConnectionStatus } from "./ui/ConnectionBar";
 import { Inspector } from "./ui/Inspector";
 import { QueryEditor } from "./ui/QueryEditor";
@@ -35,25 +33,17 @@ const GraphCanvas = lazy(() =>
 export type AppView = "query" | "schema" | "graph";
 type OutputTab = "results" | "wire";
 
-const INITIAL_QUERY = "GRAPH LIMIT 300";
-/** Cheapest way to learn the labels; HelixDB has no catalog to read. */
-const SCHEMA_QUERY = "SHOW LABELS SAMPLE 5000";
-const SCHEMA_FIELD_SAMPLE = 25;
-const SCHEMA_FIELD_CONCURRENCY = 6;
-/** Probe used to verify a connection without depending on any schema. */
-const PROBE_QUERY = "SELECT COUNT(*) FROM NODES LIMIT 1";
+const INITIAL_QUERY = "QUERY LIMIT 300";
 const THEME_KEY = "helix-visualizer.theme";
 const HISTORY_LIMIT = 12;
 
 interface RunState {
   running: boolean;
   result: QueryResult | null;
-  compiled: ExecutableQuery | null;
+  compiled: CompiledQuery | null;
   durationMs: number | null;
   error: { message: string; detail: string | null } | null;
 }
-
-type ExecutableQuery = CompiledQuery & { transportJson: string };
 
 const IDLE: RunState = {
   running: false,
@@ -95,16 +85,36 @@ export function App() {
   const graphLoadAttempted = useRef(false);
   const graphLoadId = useRef(0);
 
-  // Compile as the user types so mistakes surface before anything is sent.
-  const compileState = useMemo(() => {
-    const trimmed = query.trim();
-    if (trimmed.length === 0) return { compiled: null, error: null };
-    try {
-      return { compiled: compileForTransport(trimmed), error: null };
-    } catch (error) {
-      if (error instanceof HqlError) return { compiled: null, error };
-      return { compiled: null, error: new HqlError(String(error)) };
+  const [compileState, setCompileState] = useState<{
+    source: string;
+    compiled: CompiledQuery | null;
+    error: BackendError | null;
+  }>({ source: "", compiled: null, error: null });
+
+  // Rust is the source of truth even for live editor validation. A short
+  // debounce avoids crossing IPC for every key event in a fast typing burst.
+  useEffect(() => {
+    const source = query.trim();
+    if (!source) {
+      setCompileState({ source, compiled: null, error: null });
+      return;
     }
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void compileQuery(source)
+        .then((compiled) => {
+          if (current) setCompileState({ source, compiled, error: null });
+        })
+        .catch((error: unknown) => {
+          if (!current) return;
+          const failure = error instanceof BackendError ? error : new BackendError(String(error));
+          setCompileState({ source, compiled: null, error: failure });
+        });
+    }, 120);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
   }, [query]);
 
   useEffect(() => {
@@ -114,26 +124,21 @@ export function App() {
 
   // ---- transport helpers --------------------------------------------------
 
-  /** Sends a compiled query and decodes it, normalising every failure mode. */
-  const execute = useCallback(async (compiled: ExecutableQuery) => {
-    const response = await runQuery(compiled.transportJson);
-    const body = parseResponseBody(response);
-    return { result: readResult(body, compiled.shape), durationMs: response.durationMs };
-  }, []);
+  /** Sends source text; Rust owns compilation, transport, and decoding. */
+  const execute = useCallback((source: string) => runQuery(source), []);
 
   const describeFailure = (error: unknown): { message: string; detail: string | null } => {
-    if (error instanceof TransportError) return { message: error.message, detail: error.detail };
-    if (error instanceof ResultError) {
-      return { message: error.message, detail: previewBody(error.body) };
+    if (error instanceof BackendError) {
+      return { message: error.message, detail: error.detail ?? error.hint };
     }
-    if (error instanceof HqlError) return { message: error.message, detail: error.hint };
     return { message: error instanceof Error ? error.message : String(error), detail: null };
   };
 
   // ---- actions ------------------------------------------------------------
 
   const onRun = useCallback(async () => {
-    const compiled = compileState.compiled;
+    const source = query.trim();
+    const compiled = compileState.source === source ? compileState.compiled : null;
     if (!compiled) return;
     if (status.kind !== "connected") {
       setRun({
@@ -148,8 +153,9 @@ export function App() {
 
     setRun({ running: true, result: null, compiled, durationMs: null, error: null });
     try {
-      const { result, durationMs } = await execute(compiled);
-      setRun({ running: false, result, compiled, durationMs, error: null });
+      const execution = await execute(source);
+      const { result, durationMs } = execution;
+      setRun({ running: false, result, compiled: execution.compiled, durationMs, error: null });
       setStatus({ kind: "connected", durationMs });
 
       if (result.kind === "graph") {
@@ -168,14 +174,13 @@ export function App() {
         setView("query");
       }
 
-      const trimmed = query.trim();
       setHistory((current) =>
-        [trimmed, ...current.filter((entry) => entry !== trimmed)].slice(0, HISTORY_LIMIT),
+        [source, ...current.filter((entry) => entry !== source)].slice(0, HISTORY_LIMIT),
       );
     } catch (error) {
       const failure = describeFailure(error);
       setRun({ running: false, result: null, compiled, durationMs: null, error: failure });
-      if (error instanceof TransportError) setStatus({ kind: "failed", message: failure.message });
+      if (isConnectionFailure(error)) setStatus({ kind: "failed", message: failure.message });
     }
   }, [compileState.compiled, execute, query, status.kind]);
 
@@ -187,8 +192,8 @@ export function App() {
     setGraphError(null);
 
     try {
-      const compiled = compileForTransport(INITIAL_QUERY);
-      const { result, durationMs } = await execute(compiled);
+      const execution = await execute(INITIAL_QUERY);
+      const { result, durationMs, compiled } = execution;
       if (result.kind !== "graph") throw new Error("HelixDB returned a non-graph result.");
       if (requestId !== graphLoadId.current) return;
 
@@ -199,7 +204,7 @@ export function App() {
       if (requestId !== graphLoadId.current) return;
       const failure = describeFailure(error);
       setGraphError(`${failure.message}${failure.detail ? ` — ${failure.detail}` : ""}`);
-      if (error instanceof TransportError) setStatus({ kind: "failed", message: failure.message });
+      if (isConnectionFailure(error)) setStatus({ kind: "failed", message: failure.message });
     } finally {
       if (requestId === graphLoadId.current) setGraphLoading(false);
     }
@@ -216,8 +221,9 @@ export function App() {
       setDetailLoading(true);
       setDetailError(null);
       try {
-        const compiled = compileForTransport(`DESCRIBE ${kind === "node" ? "NODE" : "EDGE"} ${id}`);
-        const { result } = await execute(compiled);
+        const { result } = await execute(
+          `DESCRIBE ${kind === "node" ? "NODE" : "EDGE"} ${id}`,
+        );
         setDetail(result.kind === "describe" ? result : null);
       } catch (error) {
         setDetail(null);
@@ -229,76 +235,30 @@ export function App() {
     [execute],
   );
 
-  const loadSchemaLabel = useCallback(async (
-    category: "nodes" | "edges",
-    entry: LabelCount,
-  ): Promise<SchemaLabel> => {
-    try {
-      const compiled = compileForTransport(schemaQueryFor(category, entry.label, SCHEMA_FIELD_SAMPLE));
-      const { result } = await execute(compiled);
-      if (result.kind !== "rows") throw new Error("unexpected property sample response");
-      return {
-        ...entry,
-        fields: inferSchemaFields(result.rows),
-        fieldSample: result.rows.length,
-      };
-    } catch (error) {
-      return {
-        ...entry,
-        fields: [],
-        fieldSample: 0,
-        fieldError: describeFailure(error).message,
-      };
-    }
-  }, [execute]);
-
   const refreshSchema = useCallback(async () => {
     const requestId = ++schemaLoadId.current;
     setSchemaLoading(true);
     setSchemaError(null);
     try {
-      const statement = parse(SCHEMA_QUERY);
-      const compiled = compileForStatement(statement);
-      const { result, durationMs } = await execute(compiled);
-      if (result.kind !== "labels" || statement.kind !== "show") {
-        throw new Error("unexpected schema response");
-      }
+      const { schema: nextSchema, durationMs } = await loadSchema();
       if (requestId !== schemaLoadId.current) return;
-
-      const nodeLabels = (result.nodes ?? []).map(emptySchemaLabel);
-      const edgeLabels = (result.edges ?? []).map(emptySchemaLabel);
-      setSchema({ nodeLabels, edgeLabels, sample: statement.sample });
+      setSchema(nextSchema);
       setStatus({ kind: "connected", durationMs });
-
-      const [enrichedNodes, enrichedEdges] = await Promise.all([
-        mapWithConcurrency(nodeLabels, SCHEMA_FIELD_CONCURRENCY, (entry) =>
-          loadSchemaLabel("nodes", entry)),
-        mapWithConcurrency(edgeLabels, SCHEMA_FIELD_CONCURRENCY, (entry) =>
-          loadSchemaLabel("edges", entry)),
-      ]);
-      if (requestId !== schemaLoadId.current) return;
-      setSchema({
-        nodeLabels: enrichedNodes,
-        edgeLabels: enrichedEdges,
-        sample: statement.sample,
-      });
     } catch (error) {
       if (requestId !== schemaLoadId.current) return;
       const failure = describeFailure(error);
       setSchemaError(failure.message);
-      if (error instanceof TransportError) setStatus({ kind: "failed", message: failure.message });
+      if (isConnectionFailure(error)) setStatus({ kind: "failed", message: failure.message });
     } finally {
       if (requestId === schemaLoadId.current) setSchemaLoading(false);
     }
-  }, [execute, loadSchemaLabel]);
+  }, []);
 
   const testCandidate = useCallback(async (
     update: { url: string; apiKey?: string; timeoutMs: number; writerOnly: boolean },
   ) => {
     try {
-      const probe = compileForTransport(PROBE_QUERY);
-      const response = await testConnection(update, probe.transportJson);
-      parseResponseBody(response);
+      const response = await testConnection(update);
       return response.durationMs;
     } catch (error) {
       const failure = describeFailure(error);
@@ -358,7 +318,7 @@ export function App() {
   );
 
   const expandNode = useCallback((nodeId: string) => {
-    setQuery(`GRAPH NODES\nWHERE id = ${nodeId}\nTRAVERSE BOTH\nLIMIT 200`);
+    setQuery(`QUERY NODES\nWHERE id = ${nodeId}\nTRAVERSE BOTH\nLIMIT 200`);
   }, []);
 
   // ---- startup ------------------------------------------------------------
@@ -548,7 +508,7 @@ export function App() {
                   <div className="empty-state graph-empty">
                     <span className="empty-icon" aria-hidden="true">⌘</span>
                     <h2>Connect to explore your graph</h2>
-                    <p>Choose a local or cloud HelixDB instance. The current graph will load automatically.</p>
+                    <p>Choose a local, remote, or cloud HelixDB instance. The current graph will load automatically.</p>
                     <Button variant="default" className="primary" onClick={() => setConnectionOpenRequest((value) => value + 1)}>Connect Now</Button>
                   </div>
                 ) : (
@@ -593,40 +553,9 @@ function EmptyQueryState({ connected }: { connected: boolean }) {
     <div className="empty-state">
       <span className="empty-icon" aria-hidden="true">›_</span>
       <h2>{connected ? "Ready to explore" : "Connect to get started"}</h2>
-      <p>{connected ? "Run the query above to see structured results." : "Use Connection in the toolbar to choose a local or cloud instance."}</p>
+      <p>{connected ? "Run the query above to see structured results." : "Use Connection in the toolbar to choose a local, remote, or cloud instance."}</p>
     </div>
   );
-}
-
-function compileForTransport(source: string): ExecutableQuery {
-  return compileForStatement(parse(source));
-}
-
-function compileForStatement(statement: Statement): ExecutableQuery {
-  const compiled = compile(statement);
-  return { ...compiled, transportJson: compileLegacy(statement, compiled.shape) };
-}
-
-function emptySchemaLabel(entry: LabelCount): SchemaLabel {
-  return { ...entry, fields: [], fieldSample: 0 };
-}
-
-async function mapWithConcurrency<T, U>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T) => Promise<U>,
-): Promise<U[]> {
-  const results = new Array<U>(items.length);
-  let cursor = 0;
-  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor;
-      cursor += 1;
-      results[index] = await worker(items[index]);
-    }
-  });
-  await Promise.all(runners);
-  return results;
 }
 
 /** States plainly where the drawn graph is not the whole truth. */
@@ -649,14 +578,9 @@ function readInitialTheme(): Theme {
   return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
-/** A short excerpt of an unexpected response, for the error panel. */
-function previewBody(body: unknown): string {
-  try {
-    const text = JSON.stringify(body, (_key, value) =>
-      typeof value === "bigint" ? value.toString() : value,
-    );
-    return text.length > 600 ? `${text.slice(0, 600)}…` : text;
-  } catch {
-    return String(body);
-  }
+function isConnectionFailure(error: unknown): boolean {
+  return (
+    error instanceof BackendError &&
+    ["transport", "http", "invalidUrl", "result"].includes(error.kind)
+  );
 }

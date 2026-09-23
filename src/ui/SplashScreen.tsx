@@ -33,7 +33,7 @@ interface Props {
 const HELIX_SQL_PREVIEW: SplashLine[] = [
   {
     tokens: [
-      { text: "GRAPH", kind: "keyword" },
+      { text: "QUERY", kind: "keyword" },
       { text: " ", kind: "punctuation" },
       { text: "NODES", kind: "entity" },
       { text: ":", kind: "punctuation" },

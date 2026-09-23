@@ -1,17 +1,24 @@
 //! Backend for the Helix Visualizer desktop app.
 //!
-//! The webview never talks to HelixDB directly: it hands a serialized query AST
-//! to [`run_query`], which posts it to `POST {url}/v1/query`. Going through Rust
-//! keeps the app free of webview CORS rules, lets it reach plain-HTTP local
-//! instances from an `https`-origin webview, and keeps the API key in the
-//! backend's config file instead of webview storage.
+//! The webview never parses HelixSQL or talks to HelixDB directly. It hands HQL
+//! source to Rust, which lexes, parses, validates, compiles, executes, and
+//! decodes the response into UI-facing view models. This boundary also keeps
+//! the app free of webview CORS rules and the API key out of webview storage.
+
+mod hql;
+mod results;
+mod schema;
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
+
+use hql::{compile_source, CompiledQuery, CompiledQueryView, HqlError, Span};
+use results::{decode_response, decode_rows_for_schema, QueryResult, ResultError};
+use schema::{infer_schema_fields, schema_query_for, Schema, SchemaLabel};
 
 /// Path segments appended to the configured base URL. Kept as segments because
 /// `PathSegmentsMut::push` percent-encodes anything it is given, so pushing
@@ -20,6 +27,11 @@ const QUERY_PATH_SEGMENTS: [&str; 2] = ["v1", "query"];
 const CONFIG_FILE: &str = "connection.json";
 const DEFAULT_URL: &str = "http://localhost:6969";
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+const PROBE_QUERY: &str = "SELECT COUNT(*) FROM NODES LIMIT 1";
+const SCHEMA_QUERY: &str = "SHOW LABELS SAMPLE 5000";
+const SCHEMA_SAMPLE: u64 = 5_000;
+const SCHEMA_FIELD_SAMPLE: u64 = 25;
+const SCHEMA_FIELD_CONCURRENCY: usize = 6;
 
 /// Everything needed to reach one Helix instance.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -74,7 +86,8 @@ impl From<&Connection> for ConnectionView {
 }
 
 /// What the frontend sends when saving settings. `api_key` is tri-state:
-/// `None` keeps the stored key, `Some("")` clears it, `Some(k)` replaces it.
+/// `None` keeps the stored key for the same endpoint, `Some("")` clears it,
+/// and `Some(k)` replaces it.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionUpdate {
@@ -87,14 +100,32 @@ pub struct ConnectionUpdate {
     pub writer_only: bool,
 }
 
-/// One executed query, successful or not.
+/// Raw response retained only inside the Rust process.
+#[derive(Debug)]
+struct QueryResponse {
+    status: u16,
+    body: String,
+    duration_ms: u64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct QueryResponse {
-    pub status: u16,
-    /// Raw response text. Parsed on the frontend so that i64 values outside
-    /// JavaScript's safe range survive as `bigint` instead of losing precision.
-    pub body: String,
+pub struct QueryExecution {
+    pub result: QueryResult,
+    pub duration_ms: u64,
+    pub compiled: CompiledQueryView,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeResponse {
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaResponse {
+    pub schema: Schema,
     pub duration_ms: u64,
 }
 
@@ -108,16 +139,48 @@ pub enum AppError {
     Timeout(u64),
     #[error("{0}")]
     Io(String),
+    #[error("{0}")]
+    Hql(#[from] HqlError),
+    #[error("{0}")]
+    Result(#[from] ResultError),
+    #[error("HelixDB returned HTTP {status}")]
+    HttpStatus { status: u16, detail: Option<String> },
 }
 
-// Tauri requires command errors to be serializable; the message is what the
-// frontend shows, so the whole error collapses to its Display form.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ErrorPayload<'a> {
+    kind: &'static str,
+    message: String,
+    detail: Option<&'a str>,
+    span: Option<&'a Span>,
+    hint: Option<&'a str>,
+}
+
+// Tauri command errors cross IPC as a stable structured contract so the editor
+// can retain source spans and the UI can distinguish transport failures.
 impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(
         &self,
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
+        let (kind, detail, span, hint) = match self {
+            Self::InvalidUrl { reason, .. } => ("invalidUrl", Some(reason.as_str()), None, None),
+            Self::Unreachable { reason, .. } => ("transport", Some(reason.as_str()), None, None),
+            Self::Timeout(_) => ("transport", None, None, None),
+            Self::Io(detail) => ("io", Some(detail.as_str()), None, None),
+            Self::Hql(error) => ("hql", None, error.span.as_ref(), error.hint.as_deref()),
+            Self::Result(error) => ("result", error.detail.as_deref(), None, None),
+            Self::HttpStatus { detail, .. } => ("http", detail.as_deref(), None, None),
+        };
+        ErrorPayload {
+            kind,
+            message: self.to_string(),
+            detail,
+            span,
+            hint,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -199,14 +262,25 @@ fn query_endpoint(base: &str) -> Result<reqwest::Url> {
 }
 
 /// Resolves the tri-state `api_key` of a [`ConnectionUpdate`] against the key
-/// already on file: `None` keeps it, `Some("")` clears it, `Some(k)` replaces
-/// it. Shared by `set_connection` and `test_connection` so a probe and the save
-/// that follows it can never disagree about which key is in play.
-fn resolve_api_key(update: Option<String>, stored: Option<String>) -> Option<String> {
+/// already on file. An omitted key is reused only for the same effective query
+/// endpoint; changing hosts or gateway paths must never forward an old secret.
+fn resolve_api_key(
+    update: Option<String>,
+    stored: Option<String>,
+    same_endpoint: bool,
+) -> Option<String> {
     match update {
-        None => stored.filter(|k| !k.is_empty()),
+        None if same_endpoint => stored.filter(|k| !k.is_empty()),
+        None => None,
         Some(key) if key.is_empty() => None,
         Some(key) => Some(key),
+    }
+}
+
+fn is_same_endpoint(left: &str, right: &str) -> bool {
+    match (query_endpoint(left), query_endpoint(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
 
@@ -222,12 +296,15 @@ fn describe_request_error(err: &reqwest::Error) -> String {
     deepest
 }
 
-async fn post_query(state: &AppState, conn: &Connection, body: String) -> Result<QueryResponse> {
+async fn post_query(
+    http: &reqwest::Client,
+    conn: &Connection,
+    body: String,
+) -> Result<QueryResponse> {
     let endpoint = query_endpoint(&conn.url)?;
     let timeout_ms = conn.timeout_ms.clamp(1_000, 600_000);
 
-    let mut request = state
-        .http
+    let mut request = http
         .post(endpoint)
         .timeout(Duration::from_millis(timeout_ms))
         .header("content-type", "application/json")
@@ -264,14 +341,45 @@ async fn post_query(state: &AppState, conn: &Connection, body: String) -> Result
     })
 }
 
-/// Sends one already-serialized query AST to the configured instance.
-///
-/// The AST is built in the frontend by `@helix-db/helix-db`, so this stays a
-/// transport: it does not inspect or rewrite the query.
+fn require_success(response: QueryResponse) -> Result<QueryResponse> {
+    if response.status == 200 {
+        return Ok(response);
+    }
+    Err(AppError::HttpStatus {
+        status: response.status,
+        detail: (!response.body.trim().is_empty()).then(|| response.body.trim().to_owned()),
+    })
+}
+
+async fn execute_compiled(
+    http: &reqwest::Client,
+    connection: &Connection,
+    compiled: &CompiledQuery,
+) -> Result<(QueryResult, u64)> {
+    let response =
+        require_success(post_query(http, connection, compiled.transport_json.clone()).await?)?;
+    let result = decode_response(&response.body, &compiled.shape)?;
+    Ok((result, response.duration_ms))
+}
+
+/// Compiles HQL for live editor feedback and the wire-format inspector.
 #[tauri::command]
-async fn run_query(state: State<'_, AppState>, query_json: String) -> Result<QueryResponse> {
+fn compile_query(source: String) -> Result<CompiledQueryView> {
+    let compiled = compile_source(&source)?;
+    Ok(CompiledQueryView::from(&compiled))
+}
+
+/// Owns the full source-to-result pipeline for one user query.
+#[tauri::command]
+async fn run_query(state: State<'_, AppState>, source: String) -> Result<QueryExecution> {
+    let compiled = compile_source(&source)?;
     let conn = state.snapshot();
-    post_query(&state, &conn, query_json).await
+    let (result, duration_ms) = execute_compiled(&state.http, &conn, &compiled).await?;
+    Ok(QueryExecution {
+        result,
+        duration_ms,
+        compiled: CompiledQueryView::from(&compiled),
+    })
 }
 
 /// Runs a trivial query against a candidate connection without saving it, so
@@ -280,19 +388,116 @@ async fn run_query(state: State<'_, AppState>, query_json: String) -> Result<Que
 async fn test_connection(
     state: State<'_, AppState>,
     connection: ConnectionUpdate,
-    query_json: String,
-) -> Result<QueryResponse> {
+) -> Result<ProbeResponse> {
+    let stored = state.snapshot();
+    let same_endpoint = is_same_endpoint(&connection.url, &stored.url);
     let conn = Connection {
         url: connection.url,
-        // The settings form only sends a key when the user typed one, so a
-        // probe of an otherwise-unchanged connection has to reuse the saved
-        // key — otherwise editing just the URL would fail against any instance
-        // that requires auth, and the key is write-only in the UI.
-        api_key: resolve_api_key(connection.api_key, state.snapshot().api_key),
+        api_key: resolve_api_key(connection.api_key, stored.api_key, same_endpoint),
         timeout_ms: connection.timeout_ms,
         writer_only: connection.writer_only,
     };
-    post_query(&state, &conn, query_json).await
+    let compiled = compile_source(PROBE_QUERY)?;
+    let (_, duration_ms) = execute_compiled(&state.http, &conn, &compiled).await?;
+    Ok(ProbeResponse { duration_ms })
+}
+
+/// Discovers labels and samples their fields entirely in the backend. Per-label
+/// sample failures are retained on that label so one unusual type does not hide
+/// the rest of the schema.
+#[tauri::command]
+async fn load_schema(state: State<'_, AppState>) -> Result<SchemaResponse> {
+    let conn = state.snapshot();
+    let labels_query = compile_source(SCHEMA_QUERY)?;
+    let (labels, duration_ms) = execute_compiled(&state.http, &conn, &labels_query).await?;
+    let QueryResult::Labels { nodes, edges } = labels else {
+        return Err(AppError::Result(ResultError {
+            message: "unexpected schema response".into(),
+            detail: None,
+        }));
+    };
+
+    let node_labels = sample_schema_labels(
+        state.http.clone(),
+        conn.clone(),
+        "nodes",
+        nodes.unwrap_or_default(),
+    )
+    .await?;
+    let edge_labels = sample_schema_labels(
+        state.http.clone(),
+        conn.clone(),
+        "edges",
+        edges.unwrap_or_default(),
+    )
+    .await?;
+
+    Ok(SchemaResponse {
+        schema: Schema {
+            node_labels,
+            edge_labels,
+            sample: SCHEMA_SAMPLE,
+        },
+        duration_ms,
+    })
+}
+
+async fn sample_schema_labels(
+    http: reqwest::Client,
+    connection: Connection,
+    entity: &'static str,
+    labels: Vec<results::LabelCount>,
+) -> Result<Vec<SchemaLabel>> {
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(SCHEMA_FIELD_CONCURRENCY));
+    let mut tasks = tokio::task::JoinSet::new();
+    let label_count = labels.len();
+    for (index, value) in labels.into_iter().enumerate() {
+        let http = http.clone();
+        let connection = connection.clone();
+        let semaphore = Arc::clone(&semaphore);
+        tasks.spawn(async move {
+            let _permit = semaphore
+                .acquire_owned()
+                .await
+                .expect("schema semaphore remains open");
+            let label = SchemaLabel::new(value, entity);
+            (
+                index,
+                sample_schema_label(&http, &connection, entity, label).await,
+            )
+        });
+    }
+
+    let mut sampled = vec![None; label_count];
+    while let Some(completed) = tasks.join_next().await {
+        let (index, label) = completed.map_err(|error| AppError::Io(error.to_string()))?;
+        sampled[index] = Some(label);
+    }
+    Ok(sampled.into_iter().flatten().collect())
+}
+
+async fn sample_schema_label(
+    http: &reqwest::Client,
+    connection: &Connection,
+    entity: &str,
+    mut label: SchemaLabel,
+) -> SchemaLabel {
+    let source = schema_query_for(entity, &label.label, SCHEMA_FIELD_SAMPLE);
+    let sampled = async {
+        let compiled = compile_source(&source)?;
+        let response =
+            require_success(post_query(http, connection, compiled.transport_json.clone()).await?)?;
+        decode_rows_for_schema(&response.body, &compiled.shape).map_err(AppError::from)
+    }
+    .await;
+    match sampled {
+        Ok(rows) => {
+            label.field_sample = rows.len();
+            label.fields = infer_schema_fields(&rows);
+        }
+        Err(error) => label.field_error = Some(error.to_string()),
+    }
+    label
 }
 
 #[tauri::command]
@@ -307,10 +512,12 @@ fn set_connection(state: State<'_, AppState>, update: ConnectionUpdate) -> Resul
 
     let stored = {
         let mut guard = state.connection.lock().expect("connection mutex poisoned");
+        let same_endpoint = is_same_endpoint(&update.url, &guard.url);
+        let api_key = resolve_api_key(update.api_key, guard.api_key.take(), same_endpoint);
         guard.url = update.url;
         guard.timeout_ms = update.timeout_ms;
         guard.writer_only = update.writer_only;
-        guard.api_key = resolve_api_key(update.api_key, guard.api_key.take());
+        guard.api_key = api_key;
         guard.clone()
     };
 
@@ -377,8 +584,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            compile_query,
             run_query,
             test_connection,
+            load_schema,
             get_connection,
             set_connection
         ])
@@ -445,21 +654,42 @@ mod tests {
         // The settings form omits the key unless the user typed one, so a probe
         // of an unchanged connection has to reuse what is already on file.
         assert_eq!(
-            resolve_api_key(None, Some("hx_saved".into())),
+            resolve_api_key(None, Some("hx_saved".into()), true),
             Some("hx_saved".into())
         );
+        assert_eq!(resolve_api_key(None, Some("hx_saved".into()), false), None);
         // An explicit empty string is the "remove the saved key" signal.
         assert_eq!(
-            resolve_api_key(Some(String::new()), Some("hx_saved".into())),
+            resolve_api_key(Some(String::new()), Some("hx_saved".into()), true),
             None
         );
         assert_eq!(
-            resolve_api_key(Some("hx_new".into()), Some("hx_saved".into())),
+            resolve_api_key(Some("hx_new".into()), Some("hx_saved".into()), false),
             Some("hx_new".into())
         );
-        assert_eq!(resolve_api_key(None, None), None);
+        assert_eq!(resolve_api_key(None, None, true), None);
         // A stored empty string is treated as no key at all.
-        assert_eq!(resolve_api_key(None, Some(String::new())), None);
+        assert_eq!(resolve_api_key(None, Some(String::new()), true), None);
+    }
+
+    #[test]
+    fn saved_keys_are_reused_only_for_the_same_effective_endpoint() {
+        assert!(is_same_endpoint(
+            "https://helix.example.com",
+            "https://helix.example.com/"
+        ));
+        assert!(is_same_endpoint(
+            "https://helix.example.com/v1/query",
+            "https://helix.example.com"
+        ));
+        assert!(!is_same_endpoint(
+            "https://helix.example.com",
+            "https://other.example.com"
+        ));
+        assert!(!is_same_endpoint(
+            "https://gateway.example.com/team-a",
+            "https://gateway.example.com/team-b"
+        ));
     }
 
     #[test]

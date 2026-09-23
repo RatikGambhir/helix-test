@@ -1,14 +1,21 @@
 /**
- * Transport to the HelixDB instance.
+ * Typed IPC boundary to the Rust application core.
  *
- * In the packaged app every request goes through the Rust backend
- * (`src-tauri/src/lib.rs`), which owns the connection settings and the API key.
- * When the same frontend is opened in a plain browser — `npm run dev` without
- * Tauri — it falls back to Vite's `/helix` proxy so the UI stays workable
- * during development against a local instance or the bundled mock server.
+ * React sends user intent and renders returned view models. HQL parsing,
+ * compilation, transport, response decoding, and schema inference all remain
+ * in the Tauri process.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { parseJson } from "@helix-db/helix-db";
+
+import type { QueryResult } from "./results";
+import type { Schema } from "./schema";
+
+export interface Span {
+  start: number;
+  end: number;
+  line: number;
+  column: number;
+}
 
 export interface ConnectionView {
   url: string;
@@ -19,151 +26,125 @@ export interface ConnectionView {
 
 export interface ConnectionUpdate {
   url: string;
-  /** `undefined` keeps the saved key, `""` clears it, anything else replaces it. */
+  /** Omitted keeps the saved key only for the same endpoint. */
   apiKey?: string;
   timeoutMs: number;
   writerOnly: boolean;
 }
 
-export interface QueryResponse {
-  status: number;
-  body: string;
+export interface CompiledQuery {
+  transportJson: string;
+  summary: string;
+}
+
+export interface QueryExecution {
+  result: QueryResult;
+  durationMs: number;
+  compiled: CompiledQuery;
+}
+
+export interface ProbeResponse {
   durationMs: number;
 }
 
-/** A failure that already carries a message worth showing the user verbatim. */
-export class TransportError extends Error {
-  readonly detail: string | null;
+export interface SchemaResponse {
+  schema: Schema;
+  durationMs: number;
+}
 
-  constructor(message: string, detail: string | null = null) {
+interface ErrorPayload {
+  kind?: unknown;
+  message?: unknown;
+  detail?: unknown;
+  span?: unknown;
+  hint?: unknown;
+}
+
+/** A structured error produced by the Rust command boundary. */
+export class BackendError extends Error {
+  readonly kind: string;
+  readonly detail: string | null;
+  readonly span: Span | null;
+  readonly hint: string | null;
+
+  constructor(
+    message: string,
+    options: {
+      kind?: string;
+      detail?: string | null;
+      span?: Span | null;
+      hint?: string | null;
+    } = {},
+  ) {
     super(message);
-    this.name = "TransportError";
-    this.detail = detail;
+    this.name = "BackendError";
+    this.kind = options.kind ?? "backend";
+    this.detail = options.detail ?? null;
+    this.span = options.span ?? null;
+    this.hint = options.hint ?? null;
   }
 }
 
-/** True when running inside the Tauri webview rather than a browser tab. */
+/** True when running inside the Tauri webview rather than a plain browser. */
 export function isDesktop(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-const BROWSER_FALLBACK_URL = "/helix/v1/query";
-const BROWSER_CONNECTION_KEY = "helix-visualizer.browser-connection";
-
-function readBrowserConnection(): ConnectionView {
-  const fallback: ConnectionView = {
-    url: "http://localhost:6969 (via the Vite dev proxy)",
-    hasApiKey: false,
-    timeoutMs: 30_000,
-    writerOnly: false,
-  };
-  try {
-    const saved = window.localStorage.getItem(BROWSER_CONNECTION_KEY);
-    return saved ? { ...fallback, ...JSON.parse(saved) } : fallback;
-  } catch {
-    return fallback;
-  }
+function isSpan(value: unknown): value is Span {
+  if (typeof value !== "object" || value === null) return false;
+  const span = value as Record<string, unknown>;
+  return [span.start, span.end, span.line, span.column].every(
+    (part) => typeof part === "number",
+  );
 }
 
-async function browserQuery(queryJson: string): Promise<QueryResponse> {
-  const started = performance.now();
-  let response: Response;
-  try {
-    response = await fetch(BROWSER_FALLBACK_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: queryJson,
-    });
-  } catch (error) {
-    throw new TransportError(
-      "could not reach the instance through the dev proxy",
-      error instanceof Error ? error.message : String(error),
+function asBackendError(error: unknown): BackendError {
+  if (error instanceof BackendError) return error;
+  if (typeof error === "string") return new BackendError(error);
+  if (typeof error === "object" && error !== null) {
+    const payload = error as ErrorPayload;
+    return new BackendError(
+      typeof payload.message === "string" ? payload.message : String(error),
+      {
+        kind: typeof payload.kind === "string" ? payload.kind : "backend",
+        detail: typeof payload.detail === "string" ? payload.detail : null,
+        span: isSpan(payload.span) ? payload.span : null,
+        hint: typeof payload.hint === "string" ? payload.hint : null,
+      },
     );
   }
-  return {
-    status: response.status,
-    body: await response.text(),
-    durationMs: Math.round(performance.now() - started),
-  };
+  if (error instanceof Error) return new BackendError(error.message);
+  return new BackendError(String(error));
 }
 
-function asTransportError(error: unknown): TransportError {
-  // Errors thrown by a Tauri command arrive as the serialized string.
-  if (typeof error === "string") return new TransportError(error);
-  if (error instanceof Error) return new TransportError(error.message);
-  return new TransportError(String(error));
-}
-
-export async function getConnection(): Promise<ConnectionView> {
-  if (!isDesktop()) return readBrowserConnection();
+async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
-    return await invoke<ConnectionView>("get_connection");
+    return await invoke<T>(command, args);
   } catch (error) {
-    throw asTransportError(error);
+    throw asBackendError(error);
   }
 }
 
-export async function setConnection(update: ConnectionUpdate): Promise<ConnectionView> {
-  if (!isDesktop()) {
-    const view: ConnectionView = {
-      url: update.url,
-      hasApiKey: (update.apiKey ?? "").length > 0,
-      timeoutMs: update.timeoutMs,
-      writerOnly: update.writerOnly,
-    };
-    window.localStorage.setItem(BROWSER_CONNECTION_KEY, JSON.stringify(view));
-    return view;
-  }
-  try {
-    return await invoke<ConnectionView>("set_connection", { update });
-  } catch (error) {
-    throw asTransportError(error);
-  }
+export function getConnection(): Promise<ConnectionView> {
+  return call("get_connection");
 }
 
-/** Runs a compiled query against the saved connection. */
-export async function runQuery(queryJson: string): Promise<QueryResponse> {
-  if (!isDesktop()) return browserQuery(queryJson);
-  try {
-    return await invoke<QueryResponse>("run_query", { queryJson });
-  } catch (error) {
-    throw asTransportError(error);
-  }
+export function setConnection(update: ConnectionUpdate): Promise<ConnectionView> {
+  return call("set_connection", { update });
 }
 
-/** Runs a query against a candidate connection without saving it. */
-export async function testConnection(
-  connection: ConnectionUpdate,
-  queryJson: string,
-): Promise<QueryResponse> {
-  if (!isDesktop()) return browserQuery(queryJson);
-  try {
-    return await invoke<QueryResponse>("test_connection", { connection, queryJson });
-  } catch (error) {
-    throw asTransportError(error);
-  }
+export function compileQuery(source: string): Promise<CompiledQuery> {
+  return call("compile_query", { source });
 }
 
-/**
- * Parses a successful response body.
- *
- * `parseJson` comes from the HelixDB SDK and keeps i64 values outside the
- * JavaScript safe range as `bigint`, which matters because entity ids are i64
- * and are used as identity throughout the app.
- */
-export function parseResponseBody(response: QueryResponse): unknown {
-  if (response.status !== 200) {
-    throw new TransportError(
-      `HelixDB returned HTTP ${response.status}`,
-      response.body.trim() || null,
-    );
-  }
-  try {
-    return parseJson(response.body);
-  } catch (error) {
-    throw new TransportError(
-      "the instance returned a body that is not JSON",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
+export function runQuery(source: string): Promise<QueryExecution> {
+  return call("run_query", { source });
+}
+
+export function testConnection(connection: ConnectionUpdate): Promise<ProbeResponse> {
+  return call("test_connection", { connection });
+}
+
+export function loadSchema(): Promise<SchemaResponse> {
+  return call("load_schema");
 }

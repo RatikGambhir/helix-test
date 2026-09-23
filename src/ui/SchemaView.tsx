@@ -10,7 +10,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   filterSchemaEntries,
   formatSchemaValue,
-  schemaQueryFor,
   schemaValueText,
   type Schema,
   type SchemaLabel,
@@ -149,7 +148,7 @@ export function SchemaView({
           <div className="schema-page-state">
             <span className="empty-icon" aria-hidden="true"><SchemaIcon name="nodes" /></span>
             <h2>Connect to inspect your schema</h2>
-            <p>Choose a local or cloud HelixDB instance to discover its node and edge labels.</p>
+            <p>Choose a local, remote, or cloud HelixDB instance to discover its node and edge labels.</p>
             <Button variant="default" className="primary" onClick={onConnect}>Connect Now</Button>
           </div>
         ) : loading && !schema ? (
@@ -207,7 +206,6 @@ function SchemaCard({
   onToggle: () => void;
   onUseQuery: (query: string) => void;
 }) {
-  const query = schemaQueryFor(category, entry.label);
   return (
     <Card className={expanded ? `schema-card ${category} expanded` : `schema-card ${category}`}>
       <Button variant="ghost" className="schema-card-summary" onClick={onToggle} aria-expanded={expanded}>
@@ -261,7 +259,7 @@ function SchemaCard({
               </div>
             )}
           </section>
-          <Button variant="outline" onClick={() => onUseQuery(query)}>Open in Query</Button>
+          <Button variant="outline" onClick={() => onUseQuery(entry.browseQuery)}>Open in Query</Button>
         </div>
       ) : null}
     </Card>

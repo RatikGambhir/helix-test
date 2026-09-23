@@ -21,15 +21,6 @@ export default defineConfig({
     host: host || false,
     hmr: host ? { protocol: "ws", host, port: 14238 } : undefined,
     watch: { ignored: ["**/src-tauri/**"] },
-    // Only used when the frontend is opened in a plain browser instead of the
-    // Tauri window; the desktop app routes queries through the Rust backend.
-    proxy: {
-      "/helix": {
-        target: process.env.HELIX_URL || "http://localhost:6969",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/helix/, ""),
-      },
-    },
   },
   // Tauri targets a known webview, so we can emit modern output.
   build: {

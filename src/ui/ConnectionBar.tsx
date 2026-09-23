@@ -153,7 +153,7 @@ function shortHost(url: string | undefined): string {
   }
 }
 
-type ConnectionMode = "local" | "cloud";
+type ConnectionMode = "local" | "remote";
 
 function ConnectionDialog({
   connection,
@@ -176,7 +176,7 @@ function ConnectionDialog({
   const [mode, setMode] = useState<ConnectionMode>(initial.mode);
   const [host, setHost] = useState(initial.host);
   const [port, setPort] = useState(initial.port);
-  const [cloudUrl, setCloudUrl] = useState(initial.cloudUrl);
+  const [remoteUrl, setRemoteUrl] = useState(initial.remoteUrl);
   const [apiKey, setApiKey] = useState("");
   const [clearKey, setClearKey] = useState(false);
   const [timeout, setTimeoutMs] = useState(connection?.timeoutMs ?? 30_000);
@@ -186,7 +186,7 @@ function ConnectionDialog({
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const candidate = (): ConnectionUpdate => ({
-    url: mode === "local" ? buildLocalUrl(host, port) : normalizeCloudUrl(cloudUrl),
+    url: mode === "local" ? buildLocalUrl(host, port) : normalizeRemoteUrl(remoteUrl),
     apiKey: clearKey ? "" : apiKey.length > 0 ? apiKey : undefined,
     timeoutMs: timeout,
     writerOnly,
@@ -194,9 +194,11 @@ function ConnectionDialog({
 
   const validate = () => {
     if (mode === "local" && !host.trim()) throw new Error("Host address is required.");
-    if (mode === "local" && !/^\d+$/.test(port.trim())) throw new Error("Enter a valid port number.");
-    if (mode === "cloud" && !cloudUrl.trim()) throw new Error("Cloud instance URL is required.");
-    if (mode === "cloud" && !connection?.hasApiKey && !apiKey.trim()) throw new Error("An API key is required for a new cloud connection.");
+    const portNumber = Number(port);
+    if (mode === "local" && (!/^\d+$/.test(port.trim()) || portNumber < 1 || portNumber > 65_535)) {
+      throw new Error("Enter a port number from 1 to 65535.");
+    }
+    if (mode === "remote" && !remoteUrl.trim()) throw new Error("Remote server URL is required.");
   };
 
   const test = async () => {
@@ -239,14 +241,14 @@ function ConnectionDialog({
         <DialogHeader className="dialog-header">
           <div>
             <DialogTitle id="connection-title">Connection</DialogTitle>
-            <DialogDescription>Connect Helix Visualizer to a local or cloud HelixDB instance.</DialogDescription>
+            <DialogDescription>Connect to HelixDB locally, on a remote server, or in the cloud.</DialogDescription>
           </div>
           <Button variant="ghost" size="icon-sm" className="icon-button" onClick={onClose} disabled={busy !== null} aria-label="Close">×</Button>
         </DialogHeader>
 
         <div className="mode-picker" role="radiogroup" aria-label="Connection type">
           <ModeButton mode="local" active={mode} onSelect={setMode} title="Local" detail="Host and port" />
-          <ModeButton mode="cloud" active={mode} onSelect={setMode} title="Cloud" detail="URL and API key" />
+          <ModeButton mode="remote" active={mode} onSelect={setMode} title="Remote / Cloud" detail="URL and optional API key" />
         </div>
 
         <div className="dialog-fields">
@@ -267,29 +269,28 @@ function ConnectionDialog({
               </p>
             </>
           ) : (
-            <>
-              <Label className="field-label">
-                <span>Cloud instance URL</span>
-                <Input value={cloudUrl} onChange={(event) => setCloudUrl(event.target.value)} placeholder="https://your-instance.example.com" />
-              </Label>
-              <Label className="field-label">
-                <span>Cluster API key</span>
-                <Input
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder={connection?.hasApiKey ? "•••••••• (saved)" : "Enter API key"}
-                  disabled={clearKey}
-                />
-              </Label>
-              {connection?.hasApiKey ? (
-                <Label className="check-field">
-                  <Checkbox checked={clearKey} onCheckedChange={(checked) => setClearKey(checked === true)} />
-                  Remove the saved API key
-                </Label>
-              ) : null}
-            </>
+            <Label className="field-label">
+              <span>Remote server URL</span>
+              <Input value={remoteUrl} onChange={(event) => setRemoteUrl(event.target.value)} placeholder="https://your-instance.example.com" />
+            </Label>
           )}
+
+          <Label className="field-label">
+            <span>API key <small>(optional)</small></span>
+            <Input
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={connection?.hasApiKey ? "•••••••• (saved)" : "Only if required by the server"}
+              disabled={clearKey}
+            />
+          </Label>
+          {connection?.hasApiKey ? (
+            <Label className="check-field">
+              <Checkbox checked={clearKey} onCheckedChange={(checked) => setClearKey(checked === true)} />
+              Remove the saved API key
+            </Label>
+          ) : null}
 
           <Button variant="ghost" size="sm" className="advanced-toggle" onClick={() => setAdvanced((value) => !value)} aria-expanded={advanced}>
             <span aria-hidden="true">{advanced ? "⌄" : "›"}</span> Advanced options
@@ -309,7 +310,9 @@ function ConnectionDialog({
           ) : null}
 
           {!desktop ? (
-            <p className="browser-note">Browser preview uses the Vite <code>/helix</code> proxy. Set <code>HELIX_URL</code> when starting Vite to change the actual target.</p>
+            <p className="browser-note">
+              Connection and query commands require the Rust process. Launch the functional app with <code>npm run app</code>.
+            </p>
           ) : null}
 
           {feedback ? <div className={`connection-feedback ${feedback.kind}`} role="status">{feedback.message}</div> : null}
@@ -318,8 +321,8 @@ function ConnectionDialog({
         <footer className="dialog-actions">
           {connected ? <Button variant="destructive" className="danger-button" onClick={onDisconnect} disabled={busy !== null}>Disconnect</Button> : <span />}
           <div>
-            <Button variant="outline" onClick={test} disabled={busy !== null}>{busy === "test" ? "Testing…" : "Test connection"}</Button>
-            <Button type="submit" variant="default" className="primary" disabled={busy !== null}>{busy === "connect" ? "Connecting…" : connected ? "Reconnect" : "Connect"}</Button>
+            <Button variant="outline" onClick={test} disabled={busy !== null || !desktop}>{busy === "test" ? "Testing…" : "Test connection"}</Button>
+            <Button type="submit" variant="default" className="primary" disabled={busy !== null || !desktop}>{busy === "connect" ? "Connecting…" : connected ? "Reconnect" : "Connect"}</Button>
           </div>
         </footer>
       </form>
@@ -339,17 +342,17 @@ function ModeButton({ mode, active, onSelect, title, detail }: { mode: Connectio
 }
 
 function parseConnection(connection: ConnectionView | null) {
-  const fallback = { mode: "local" as const, host: "127.0.0.1", port: "6969", cloudUrl: "" };
+  const fallback = { mode: "local" as const, host: "127.0.0.1", port: "6969", remoteUrl: "" };
   if (!connection) return fallback;
   const raw = connection.url.replace(" (via the Vite dev proxy)", "");
   try {
     const url = new URL(raw);
-    const isLocal = ["localhost", "127.0.0.1", "::1"].includes(url.hostname) && url.protocol === "http:";
+    const isLocal = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname) && url.protocol === "http:";
     return {
-      mode: (isLocal ? "local" : "cloud") as ConnectionMode,
+      mode: (isLocal ? "local" : "remote") as ConnectionMode,
       host: isLocal ? (url.hostname === "localhost" ? "127.0.0.1" : url.hostname) : "127.0.0.1",
       port: isLocal ? (url.port || "6969") : "6969",
-      cloudUrl: isLocal ? "" : raw,
+      remoteUrl: isLocal ? "" : raw,
     };
   } catch {
     return fallback;
@@ -358,10 +361,13 @@ function parseConnection(connection: ConnectionView | null) {
 
 function buildLocalUrl(host: string, port: string): string {
   const normalizedHost = host.trim().toLowerCase() === "localhost" ? "127.0.0.1" : host.trim();
-  return `http://${normalizedHost}:${port.trim()}`;
+  const urlHost = normalizedHost.includes(":") && !normalizedHost.startsWith("[")
+    ? `[${normalizedHost}]`
+    : normalizedHost;
+  return `http://${urlHost}:${port.trim()}`;
 }
 
-function normalizeCloudUrl(value: string): string {
+function normalizeRemoteUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, "");
   return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
 }

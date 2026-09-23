@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
-import { HqlError } from "../hql/ast";
+import type { BackendError } from "../client";
 
 interface Props {
   value: string;
@@ -11,7 +11,7 @@ interface Props {
   onRun: () => void;
   running: boolean;
   /** Parse/compile failure for the current text, if any. */
-  error: HqlError | null;
+  error: BackendError | null;
 }
 
 /**

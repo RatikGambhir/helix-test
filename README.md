@@ -17,7 +17,7 @@ connection, `/v1/query`, and automatic graph-loading change log.
   TRAVERSE OUT …`) that compiles to HelixDB's JSON traversal AST. Full grammar
   below.
 - **Graph view** — connecting from the Graph workspace automatically loads a
-  bounded snapshot; a manual `GRAPH` query can replace it. The force-directed
+  bounded snapshot; a manual `QUERY` statement can replace it. The force-directed
   canvas supports pan, zoom, drag, neighbourhood focus on hover, and per-label
   colouring.
 - **Inspector** — click a node or edge to see its properties, its incident edges
@@ -56,6 +56,19 @@ Set the instance from Connection in the top toolbar. It is saved to the app
 config directory and prefilled on the next launch. For a Docker mapping such as
 `6969:8080`, enter the host-side port `6969`.
 
+The desktop app can connect directly to all of these:
+
+- a local instance such as `http://127.0.0.1:6969`;
+- a HelixDB server elsewhere on your network such as `http://192.168.1.20:6969`;
+- an HTTPS cloud deployment such as `https://helix.example.com`;
+- a deployment behind a gateway path such as `https://example.com/helix`.
+
+Choose **Remote / Cloud** for a full URL. API keys are optional and are sent as
+`Authorization: Bearer <key>` only when supplied. Remote URLs default to HTTPS
+when the scheme is omitted. The desktop Rust transport is not subject to browser
+CORS rules. A saved key is reused only while reconnecting to the same effective
+endpoint, so changing the host or gateway path cannot forward an old credential.
+
 To build a distributable:
 
 ```bash
@@ -67,9 +80,9 @@ run `npm run tauri icon src-tauri/icons/icon.png` once.
 
 ### Without a HelixDB instance
 
-`tools/mock-helix-server.mjs` exercises the SDK traversal representation over a small in-memory
-sample graph (users, posts, topics, orgs). It interprets the same traversal AST
-HelixDB does, for the subset of steps this app emits — it is a development
+`tools/mock-helix-server.mjs` exercises the Explorer-compatible `/v1/query`
+format over a small in-memory sample graph (users, posts, topics, orgs). It
+interprets the subset of traversal steps this app emits — it is a development
 stand-in, **not** a HelixDB implementation.
 
 ```bash
@@ -77,27 +90,24 @@ npm run mock                       # listens on :6969
 npm run app                        # point the app at http://localhost:6969
 ```
 
-### In a browser
+### Frontend-only development
 
-The frontend also runs as an ordinary web page, which is handy for quick
-iteration:
+`npm run dev` can still render the UI shell for styling work, but queries and
+connection actions require the Rust process. Use `npm run app` for functional
+development. This is intentional: there is one parser, compiler, transport,
+and response decoder, all in Rust, instead of a separate browser implementation.
 
 ```bash
-npm run mock
 npm run dev                        # http://localhost:14237
 ```
-
-In that mode there is no Rust backend, so queries go through Vite's `/helix`
-proxy instead. Point it elsewhere with `HELIX_URL=http://host:6969 npm run dev`.
 
 ## HelixSQL
 
 HelixDB has no SQL dialect of its own; queries are built as a JSON traversal
-AST. HelixSQL is a thin front end over that AST. The official
-[`@helix-db/helix-db`](https://www.npmjs.com/package/@helix-db/helix-db) SDK
-representation supplies validation and result-shape metadata, while the live
-transport emits the flat Explorer-compatible format accepted by the current
-enterprise-dev `/v1/query` endpoint.
+AST. HelixSQL is a thin, Rust-implemented language over that AST. The backend
+lexes, parses, validates, and compiles source directly to the flat
+Explorer-compatible format accepted by the current enterprise-dev `/v1/query`
+endpoint.
 
 Keywords are case-insensitive; labels and property names are not.
 
@@ -159,12 +169,12 @@ TRAVERSE OUT EDGES Follows WHERE since > 2022
 Using a hop from the wrong side (`FROM EDGES … TRAVERSE OUT`) is rejected before
 anything is sent, with the offending clause pointed at.
 
-### GRAPH
+### QUERY
 
 Returns nodes plus the edges among them, and draws them.
 
 ```
-GRAPH [ [FROM] NODES[:<Label>] ]
+QUERY [ [FROM] NODES[:<Label>] ]
 [ WHERE <condition> ] [ TRAVERSE … ]…
 [ VIA <EdgeLabel> ] [ WITH <property> [, …] ]
 [ ORDER BY … ] [ SKIP <n> ] [ LIMIT <n> ] [ EDGE LIMIT <n> ]
@@ -180,10 +190,13 @@ some of them will still lead to nodes that were not fetched; those cannot be
 drawn, and the view reports how many rather than dropping them silently.
 
 ```sql
-GRAPH LIMIT 300
-GRAPH NODES:User VIA Follows WITH name LIMIT 150
-GRAPH NODES WHERE id = 42 TRAVERSE BOTH LIMIT 200
+QUERY LIMIT 300
+QUERY NODES:User VIA Follows WITH name LIMIT 150
+QUERY NODES WHERE id = 42 TRAVERSE BOTH LIMIT 200
 ```
+
+`GRAPH` is still accepted as a compatibility alias for saved queries, but new
+queries and app-generated examples use `QUERY`.
 
 Only edges whose *both* endpoints are in the fetched node set can be drawn. Any
 that leave the selection are counted and reported under the canvas rather than
@@ -214,38 +227,40 @@ sample size is stated wherever labels are shown.
 ## How it fits together
 
 ```
-src/hql/          lexer → parser → AST → compiler (emits the HelixDB query AST)
-src/results.ts    decodes a response into the view models the UI renders
+src/              React UI, typed IPC client, and presentation-only helpers
 src/graph/        force layout (Barnes–Hut) + React Flow renderer + colour assignment
 src/ui/           editor, results table, inspector, sidebar, connection bar
-src-tauri/        Rust backend: connection settings + an HTTP proxy to Helix
+src-tauri/src/hql.rs      lexer → parser → AST → validator → wire compiler
+src-tauri/src/results.rs  Helix response decoder → UI-facing view models
+src-tauri/src/schema.rs   schema query generation and property inference
+src-tauri/src/lib.rs      commands, connection state, HTTP transport, orchestration
 tools/            mock HelixDB server, icon generator
 ```
 
-The webview never talks to HelixDB directly. It hands the serialized query to
-the Rust command `run_query`, which posts it to `{url}/v1/query`. That keeps the
-app clear of webview CORS rules, lets an `https`-origin webview reach a
+The webview never parses HQL or talks to HelixDB directly. It hands source text
+to the Rust command `run_query`; Rust compiles it, posts it to `{url}/v1/query`,
+and returns a decoded view model. That keeps the app clear of webview CORS rules, lets an `https`-origin webview reach a
 plain-HTTP local instance, and keeps the API key in the backend's config file
 rather than in webview storage. That file is written to the platform config
 directory as `connection.json`, narrowed to `0600` on Unix; the key is stored in
 plain text, so it is protected by file permissions rather than by a keychain.
 
-Entity ids are `i64`, which JavaScript cannot hold exactly in a `number`. The
-Rust side returns the response as text and the frontend parses it with the SDK's
-`parseJson`, so ids above 2^53 survive as `bigint` end to end.
+Entity ids are `i64`, which JavaScript cannot hold exactly in a `number`. Rust
+parses them exactly, exposes entity ids as strings, and converts any other
+out-of-range integer to a string before IPC, so no value silently rounds in the
+webview.
 
 ## Tests
 
 ```bash
-npm test                    # parser, compiler, and end-to-end against the mock
+npm test                    # presentation, graph-layout, and UI helper tests
 npm run typecheck
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-The end-to-end tests boot the mock server and drive the SDK-representation path
-from HelixSQL text through HTTP and decoded results. Separate legacy compiler
-tests cover the Explorer-compatible production wire format. They verify this
-app's pipelines; they are not a conformance test against every HelixDB version.
+Rust tests cover HQL tokenization, parsing, semantic validation, v1 compilation,
+response envelopes, graph normalization, i64 preservation, and schema
+inference. Frontend tests cover the remaining presentation behavior.
 
 ## Known limits
 

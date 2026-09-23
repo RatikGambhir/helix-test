@@ -1,7 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { LabelCount } from "../results";
-import type { Schema } from "../schema";
+import type { Schema, SchemaLabel } from "../schema";
 
 interface Props {
   schema: Schema | null;
@@ -13,7 +12,7 @@ interface Props {
 }
 
 const EXAMPLES: { title: string; query: string }[] = [
-  { title: "Whole graph", query: "GRAPH LIMIT 300" },
+  { title: "Whole graph", query: "QUERY LIMIT 300" },
   { title: "Browse nodes", query: "SELECT * FROM NODES LIMIT 50" },
   {
     title: "Filter by property",
@@ -62,15 +61,15 @@ export function Sidebar({
               title="Nodes"
               labels={schema.nodeLabels}
               onUseQuery={onUseQuery}
-              toQuery={(label) => `GRAPH NODES:${quote(label)} LIMIT 300`}
-              toAltQuery={(label) => `SELECT * FROM NODES:${quote(label)} LIMIT 50`}
+              primary="graphQuery"
+              secondary="browseQuery"
             />
             <LabelList
               title="Edges"
               labels={schema.edgeLabels}
               onUseQuery={onUseQuery}
-              toQuery={(label) => `SELECT * FROM EDGES:${quote(label)} LIMIT 50`}
-              toAltQuery={(label) => `GRAPH VIA ${quote(label)} LIMIT 300`}
+              primary="browseQuery"
+              secondary="graphQuery"
             />
             <p className="hint-text">
               Derived from a sample of {schema.sample.toLocaleString()} entities per side — rare
@@ -119,14 +118,14 @@ function LabelList({
   title,
   labels,
   onUseQuery,
-  toQuery,
-  toAltQuery,
+  primary,
+  secondary,
 }: {
   title: string;
-  labels: LabelCount[];
+  labels: SchemaLabel[];
   onUseQuery: (query: string) => void;
-  toQuery: (label: string) => string;
-  toAltQuery: (label: string) => string;
+  primary: "browseQuery" | "graphQuery";
+  secondary: "browseQuery" | "graphQuery";
 }) {
   if (labels.length === 0) {
     return (
@@ -142,15 +141,15 @@ function LabelList({
       <ul className="label-list">
         {labels.map((entry) => (
           <li key={entry.label}>
-            <Button variant="ghost" onClick={() => onUseQuery(toQuery(entry.label))} title={toQuery(entry.label)}>
+            <Button variant="ghost" onClick={() => onUseQuery(entry[primary])} title={entry[primary]}>
               {entry.label}
             </Button>
             <Button
               variant="ghost"
               size="icon-sm"
               className="label-alt"
-              onClick={() => onUseQuery(toAltQuery(entry.label))}
-              title={toAltQuery(entry.label)}
+              onClick={() => onUseQuery(entry[secondary])}
+              title={entry[secondary]}
             >
               ⋯
             </Button>
@@ -160,9 +159,4 @@ function LabelList({
       </ul>
     </div>
   );
-}
-
-/** Labels that are not bare identifiers have to be quoted in HelixSQL. */
-function quote(label: string): string {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(label) ? label : `"${label.replace(/"/g, '""')}"`;
 }
