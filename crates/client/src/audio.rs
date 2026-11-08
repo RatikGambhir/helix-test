@@ -20,15 +20,8 @@ pub enum Sound {
     Thunder,
     Splash,
     Click,
-    Bow,
-    Hit,
     Eat,
     Door,
-    Growl,
-    Moo,
-    Oink,
-    Cluck,
-    Baa,
 }
 
 pub struct Audio {
@@ -183,8 +176,6 @@ fn synth(s: Sound, vol: f32, seed: u32) -> Vec<f32> {
         }
         Sound::Splash => noise(0.5, 2200.0, 7.0, &mut rng),
         Sound::Click => tone(0.03, 1800.0, 1600.0, 120.0, &[0.4]),
-        Sound::Bow => mix(tone(0.25, 260.0, 200.0, 14.0, &[0.5, 0.25]), noise(0.15, 4000.0, 25.0, &mut rng), 0.5),
-        Sound::Hit => mix(noise(0.12, 1200.0, 30.0, &mut rng), tone(0.1, 200.0, 120.0, 30.0, &[0.6]), 0.8),
         Sound::Eat => {
             let mut v = Vec::new();
             for _ in 0..3 {
@@ -194,11 +185,6 @@ fn synth(s: Sound, vol: f32, seed: u32) -> Vec<f32> {
             v
         }
         Sound::Door => mix(noise(0.15, 700.0, 25.0, &mut rng), tone(0.18, 180.0, 140.0, 20.0, &[0.5, 0.2]), 1.0),
-        Sound::Growl => tone(0.7, 95.0, 80.0, 3.0, &[0.5, 0.35, 0.25, 0.15]).into_iter().enumerate().map(|(i, x)| x * (1.0 + 0.4 * (i as f32 / 900.0).sin())).collect(),
-        Sound::Moo => tone(0.8, 140.0, 110.0, 2.5, &[0.5, 0.3, 0.2]),
-        Sound::Oink => tone(0.25, 300.0, 240.0, 8.0, &[0.4, 0.3, 0.2]),
-        Sound::Cluck => tone(0.08, 900.0, 700.0, 30.0, &[0.4, 0.2]),
-        Sound::Baa => tone(0.5, 380.0, 340.0, 4.0, &[0.4, 0.3, 0.2, 0.1]),
     };
     for x in &mut out {
         *x = (*x * vol * 0.6).clamp(-1.0, 1.0);

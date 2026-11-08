@@ -1,11 +1,10 @@
 //! The 3D renderer, plugged into Rune as its compositor: each frame draws the sky, the world,
-//! players, mobs and effects with wgpu, then has Rune draw the HUD and menus on top.
+//! players, dropped items and effects with wgpu, then has Rune draw the HUD and menus on top.
 
 use crate::game::{Mode, Screen, State};
 use crate::mesh::{SectionKey, Vertex, tile_uv};
 use runecraft_common::block::tile;
 use runecraft_common::chunk::CHUNK;
-use runecraft_common::protocol::EntityKind;
 use crate::game::View;
 use runecraft_common::block;
 use glam::{Mat4, Vec3, Vec4};
@@ -526,7 +525,7 @@ struct Look {
     shirt: u8,
     pants: u8,
     hair: u8,
-    /// Arm and leg thickness (skeletons are thin).
+    /// Arm and leg thickness.
     limb: f32,
     arms_forward: bool,
 }
@@ -570,56 +569,6 @@ fn humanoid(out: &mut Vec<Vertex>, pos: Vec3, yaw: f32, pitch: f32, walk: f32, s
     push_box(out, part(base, neck, pitch), Vec3::new(-0.25, 1.5, -0.25), Vec3::new(0.5, 0.5, 0.5), [look.skin, look.skin, look.hair, look.skin, look.hair, look.face], light, flags);
 }
 
-/// Four-legged animals. Mobs face +X at yaw 0 on the server.
-fn quadruped(out: &mut Vec<Vertex>, pos: Vec3, yaw: f32, walk: f32, speed: f32, kind: EntityKind, light: [u8; 2], flags: u8) {
-    let base = Mat4::from_translation(pos) * Mat4::from_rotation_y(-yaw - std::f32::consts::FRAC_PI_2);
-    let swing = walk.sin() * 0.6 * (speed / 2.0).min(1.0);
-    let (body, face, leg, w, h, len, hip) = match kind {
-        EntityKind::Sheep => (tile::SHEEP, tile::SHEEP_FACE, tile::SHEEP_FACE, 0.7, 0.6, 1.0, 0.35),
-        EntityKind::Cow => (tile::COW, tile::COW_FACE, tile::COW, 0.8, 0.75, 1.2, 0.5),
-        _ => (tile::PIG, tile::PIG_FACE, tile::PIG, 0.6, 0.5, 0.9, 0.35),
-    };
-    push_box(out, base, Vec3::new(-w / 2.0, hip, -len / 2.0), Vec3::new(w, h, len), [body; 6], light, flags);
-    let hs = if kind == EntityKind::Cow { 0.5 } else { 0.44 };
-    push_box(out, base, Vec3::new(-hs / 2.0, hip + h * 0.4, -len / 2.0 - hs * 0.8), Vec3::new(hs, hs, hs * 0.85), [body, body, body, body, body, face], light, flags);
-    let lz = len / 2.0 - 0.2;
-    for (i, (x, z)) in [(-w / 2.0 + 0.02, -lz), (w / 2.0 - 0.22, -lz), (-w / 2.0 + 0.02, lz - 0.2), (w / 2.0 - 0.22, lz - 0.2)].iter().enumerate() {
-        let a = if i % 3 == 0 { swing } else { -swing };
-        push_box(out, part(base, Vec3::new(0.0, hip, *z + 0.1), a), Vec3::new(*x, 0.0, *z), Vec3::new(0.2, hip, 0.2), [leg; 6], light, flags);
-    }
-}
-
-fn chicken(out: &mut Vec<Vertex>, pos: Vec3, yaw: f32, walk: f32, speed: f32, light: [u8; 2], flags: u8) {
-    let base = Mat4::from_translation(pos) * Mat4::from_rotation_y(-yaw - std::f32::consts::FRAC_PI_2);
-    let swing = walk.sin() * 0.8 * (speed / 2.0).min(1.0);
-    let c = tile::CHICKEN;
-    push_box(out, base, Vec3::new(-0.2, 0.3, -0.25), Vec3::new(0.4, 0.35, 0.5), [c; 6], light, flags);
-    push_box(out, base, Vec3::new(-0.13, 0.55, -0.42), Vec3::new(0.26, 0.3, 0.22), [c, c, c, c, c, tile::CHICKEN_FACE], light, flags);
-    for x in [-0.12, 0.04] {
-        push_box(out, part(base, Vec3::new(0.0, 0.3, 0.0), if x < 0.0 { swing } else { -swing }), Vec3::new(x, 0.0, -0.03), Vec3::new(0.06, 0.3, 0.06), [tile::GOLD_BLOCK; 6], light, flags);
-    }
-}
-
-fn spider(out: &mut Vec<Vertex>, pos: Vec3, yaw: f32, walk: f32, speed: f32, light: [u8; 2], flags: u8) {
-    let base = Mat4::from_translation(pos) * Mat4::from_rotation_y(-yaw - std::f32::consts::FRAC_PI_2);
-    let s = tile::SPIDER;
-    push_box(out, base, Vec3::new(-0.45, 0.25, -0.1), Vec3::new(0.9, 0.55, 0.85), [s; 6], light, flags);
-    push_box(out, base, Vec3::new(-0.3, 0.3, -0.5), Vec3::new(0.6, 0.45, 0.42), [s, s, s, s, s, tile::SPIDER_FACE], light, flags);
-    for i in 0..4 {
-        let z = -0.35 + i as f32 * 0.2;
-        let a = (walk + i as f32).sin() * 0.4 * (speed / 2.0).min(1.0);
-        for side in [-1.0f32, 1.0] {
-            let leg = base * Mat4::from_translation(Vec3::new(side * 0.4, 0.5, z)) * Mat4::from_rotation_y(a) * Mat4::from_rotation_z(side * -0.5);
-            push_box(out, leg, Vec3::new(if side > 0.0 { 0.0 } else { -0.85 }, -0.04, -0.04), Vec3::new(0.85, 0.08, 0.08), [s; 6], light, flags);
-        }
-    }
-}
-
-fn arrow(out: &mut Vec<Vertex>, pos: Vec3, yaw: f32, pitch: f32, light: [u8; 2]) {
-    let m = Mat4::from_translation(pos) * Mat4::from_rotation_y(-yaw) * Mat4::from_rotation_x(pitch);
-    push_box(out, m, Vec3::new(-0.03, -0.03, -0.35), Vec3::new(0.06, 0.06, 0.7), [tile::PLANKS, tile::PLANKS, tile::PLANKS, tile::PLANKS, tile::WHITE, tile::STEEL], light, 0);
-}
-
 fn item(out: &mut Vec<Vertex>, pos: Vec3, id: u8, t: f64, salt: u32, light: [u8; 2]) {
     let spin = (t as f32 * 1.6 + salt as f32) % std::f32::consts::TAU;
     let bob = ((t as f32 * 2.5 + salt as f32).sin() + 1.0) * 0.06;
@@ -644,28 +593,8 @@ fn entity_vertices(s: &State) -> Vec<Vertex> {
         let held = s.held_item().map_or(0, |h| h.id);
         humanoid(&mut out, s.body.pos, s.yaw, s.pitch, walk, speed, &person(s.skin), held, s.swing, light_at(s, s.body.pos), 0);
     }
-    for (id, m) in &s.entities {
-        let flags = if m.hurt { 4 } else { 0 };
-        let light = light_at(s, m.pos);
-        match m.kind {
-            EntityKind::Zombie => {
-                let look = Look { skin: tile::ZOMBIE, face: tile::ZOMBIE_FACE, shirt: tile::SHIRT + 2, pants: tile::PANTS, hair: tile::ZOMBIE, limb: 0.25, arms_forward: true };
-                humanoid(&mut out, m.pos, m.yaw + std::f32::consts::FRAC_PI_2, 0.0, m.walk, m.speed, &look, 0, 0.0, light, flags);
-            }
-            EntityKind::Skeleton => {
-                let look = Look { skin: tile::SKELETON, face: tile::SKELETON_FACE, shirt: tile::SKELETON, pants: tile::SKELETON, hair: tile::SKELETON, limb: 0.14, arms_forward: true };
-                humanoid(&mut out, m.pos, m.yaw + std::f32::consts::FRAC_PI_2, 0.0, m.walk, m.speed, &look, block::BOW, 0.0, light, flags);
-            }
-            EntityKind::Citizen => {
-                let look = person(m.item);
-                humanoid(&mut out, m.pos, m.yaw + std::f32::consts::FRAC_PI_2, 0.0, m.walk, m.speed, &look, 0, 0.0, light, flags);
-            }
-            EntityKind::Spider => spider(&mut out, m.pos, m.yaw, m.walk, m.speed, light, flags),
-            EntityKind::Chicken => chicken(&mut out, m.pos, m.yaw, m.walk, m.speed, light, flags),
-            EntityKind::Pig | EntityKind::Sheep | EntityKind::Cow => quadruped(&mut out, m.pos, m.yaw, m.walk, m.speed, m.kind, light, flags),
-            EntityKind::Arrow => arrow(&mut out, m.pos, m.yaw, m.pitch, light),
-            EntityKind::Item => item(&mut out, m.pos, m.item, s.t, *id, light),
-        }
+    for (id, it) in &s.items {
+        item(&mut out, it.pos, it.item, s.t, *id, light_at(s, it.pos));
     }
     for p in &s.particles {
         let flags = if p.glow { 3 } else { 0 };

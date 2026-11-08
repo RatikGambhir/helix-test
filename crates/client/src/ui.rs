@@ -125,7 +125,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
 
 fn title(s: &State) -> El {
     let heading = col().gap(4.0).items_center().child(label("RUNECRAFT", TextStyle::new(56.0, 800.0).tracking(4.0), white())).child(label(
-        "Mine, build and survive. Explore New York, Tokyo, Chicago, London and more with friends.",
+        "Mine, craft and build. Explore New York, Tokyo, Chicago, London and more with friends.",
         BODY,
         rgba(0xd6e4ff, 0.9),
     ));
@@ -611,7 +611,7 @@ fn debug(s: &State) -> El {
         format!("Facing {:.0}°  pitch {:.0}°", s.yaw.to_degrees(), s.pitch.to_degrees()),
         format!("Biome {}", s.biome_here()),
         format!("Time {:02}:{:02}", ((s.time_of_day * 24.0 + 6.0) as i32) % 24, (s.time_of_day * 1440.0) as i32 % 60),
-        format!("Chunks {}  meshing {}  creatures {}", s.world.columns.len(), s.world.pending(), s.entities.len()),
+        format!("Chunks {}  meshing {}  items {}", s.world.columns.len(), s.world.pending(), s.items.len()),
         format!("Seed {}  world {}", s.seed, s.world_label),
         match s.target {
             Some(h) => format!("Looking at {} ({}, {}, {})", block::item_name(h.block), h.pos.x, h.pos.y, h.pos.z),
@@ -851,8 +851,8 @@ fn controls_lines() -> Vec<(&'static str, &'static str)> {
     vec![
         ("W A S D", "Walk (Ctrl to sprint, Shift to sneak)"),
         ("Mouse", "Look around (click to grab, Esc to let go)"),
-        ("Left click", "Mine (hold), attack"),
-        ("Right click", "Place, use doors, beds, chests, eat, shoot"),
+        ("Left click", "Mine (hold)"),
+        ("Right click", "Place; use doors, beds, chests, tables; eat"),
         ("Space", "Jump, swim up, climb · double-tap to fly"),
         ("1–9, wheel", "Choose hotbar slot"),
         ("E", "Inventory and crafting"),

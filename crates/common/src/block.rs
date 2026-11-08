@@ -81,7 +81,6 @@ pub mod tile {
     pub const PICK: u8 = 101; // 4 tiers: 101..=104
     pub const APPLE: u8 = 105;
     pub const BREAD: u8 = 106;
-    pub const SWORD: u8 = 107; // 4 tiers: 107..=110
     // Utility tiles
     pub const CRACK: u8 = 112; // 10 stages: 112..=121
     pub const WHITE: u8 = 122;
@@ -91,12 +90,6 @@ pub mod tile {
     pub const PANTS: u8 = 136;
     pub const FACE: u8 = 137; // 4 faces: 137..=140
     pub const HAIR: u8 = 141;
-    pub const PIG: u8 = 142;
-    pub const PIG_FACE: u8 = 143;
-    pub const SHEEP: u8 = 144;
-    pub const SHEEP_FACE: u8 = 145;
-    pub const ZOMBIE: u8 = 146;
-    pub const ZOMBIE_FACE: u8 = 147;
     pub const TORCH: u8 = 148;
     pub const DOOR_TOP: u8 = 149;
     pub const DOOR_BOTTOM: u8 = 150;
@@ -114,14 +107,6 @@ pub mod tile {
     pub const RAIL: u8 = 165;
     pub const SEEDS: u8 = 166;
     pub const WHEAT_ITEM: u8 = 167;
-    pub const MEAT: u8 = 168; // pork, cooked, beef, steak, chicken, cooked, mutton, cooked: 168..=175
-    pub const ROTTEN: u8 = 176;
-    pub const BONE: u8 = 177;
-    pub const STRING: u8 = 178;
-    pub const FEATHER: u8 = 179;
-    pub const LEATHER: u8 = 180;
-    pub const ARROW: u8 = 181;
-    pub const BOW: u8 = 182;
     pub const COPPER_INGOT: u8 = 183;
     pub const AXE: u8 = 184; // 4 tiers
     pub const SHOVEL: u8 = 188; // 4 tiers
@@ -130,16 +115,6 @@ pub mod tile {
     pub const BUCKET: u8 = 204;
     pub const WATER_BUCKET: u8 = 205;
     pub const LAVA_BUCKET: u8 = 206;
-    pub const BONE_MEAL: u8 = 207;
-    pub const FLINT: u8 = 208;
-    pub const COW: u8 = 209;
-    pub const COW_FACE: u8 = 210;
-    pub const CHICKEN: u8 = 211;
-    pub const CHICKEN_FACE: u8 = 212;
-    pub const SKELETON: u8 = 213;
-    pub const SKELETON_FACE: u8 = 214;
-    pub const SPIDER: u8 = 215;
-    pub const SPIDER_FACE: u8 = 216;
     pub const RAIN: u8 = 217;
     pub const SNOWFLAKE: u8 = 218;
     pub const SMOKE: u8 = 219;
@@ -314,48 +289,27 @@ pub const IRON_PICK: BlockId = 135;
 pub const DIAMOND_PICK: BlockId = 136;
 pub const APPLE: BlockId = 137;
 pub const BREAD: BlockId = 138;
-pub const WOOD_SWORD: BlockId = 139;
-pub const STONE_SWORD: BlockId = 140;
-pub const IRON_SWORD: BlockId = 141;
-pub const DIAMOND_SWORD: BlockId = 142;
-pub const SEEDS: BlockId = 143;
-pub const WHEAT: BlockId = 144;
-pub const RAW_PORK: BlockId = 145;
-pub const COOKED_PORK: BlockId = 146;
-pub const RAW_BEEF: BlockId = 147;
-pub const STEAK: BlockId = 148;
-pub const RAW_CHICKEN: BlockId = 149;
-pub const COOKED_CHICKEN: BlockId = 150;
-pub const RAW_MUTTON: BlockId = 151;
-pub const COOKED_MUTTON: BlockId = 152;
-pub const ROTTEN_FLESH: BlockId = 153;
-pub const BONE: BlockId = 154;
-pub const STRING: BlockId = 155;
-pub const FEATHER: BlockId = 156;
-pub const LEATHER: BlockId = 157;
-pub const ARROW: BlockId = 158;
-pub const BOW: BlockId = 159;
-pub const COPPER_INGOT: BlockId = 160;
-pub const WOOD_AXE: BlockId = 161;
-pub const DIAMOND_AXE: BlockId = 164;
-pub const WOOD_SHOVEL: BlockId = 165;
-pub const DIAMOND_SHOVEL: BlockId = 168;
-pub const WOOD_HOE: BlockId = 169;
-pub const DIAMOND_HOE: BlockId = 172;
-pub const IRON_HELMET: BlockId = 173;
-pub const IRON_CHESTPLATE: BlockId = 174;
-pub const IRON_LEGGINGS: BlockId = 175;
-pub const IRON_BOOTS: BlockId = 176;
-pub const DIAMOND_HELMET: BlockId = 177;
-pub const DIAMOND_CHESTPLATE: BlockId = 178;
-pub const DIAMOND_LEGGINGS: BlockId = 179;
-pub const DIAMOND_BOOTS: BlockId = 180;
-pub const BUCKET: BlockId = 181;
-pub const WATER_BUCKET: BlockId = 182;
-pub const LAVA_BUCKET: BlockId = 183;
-pub const BONE_MEAL: BlockId = 184;
-pub const FLINT: BlockId = 185;
-pub const ITEM_END: BlockId = 186;
+pub const SEEDS: BlockId = 139;
+pub const WHEAT: BlockId = 140;
+pub const COPPER_INGOT: BlockId = 141;
+pub const WOOD_AXE: BlockId = 142;
+pub const DIAMOND_AXE: BlockId = 145;
+pub const WOOD_SHOVEL: BlockId = 146;
+pub const DIAMOND_SHOVEL: BlockId = 149;
+pub const WOOD_HOE: BlockId = 150;
+pub const DIAMOND_HOE: BlockId = 153;
+pub const IRON_HELMET: BlockId = 154;
+pub const IRON_CHESTPLATE: BlockId = 155;
+pub const IRON_LEGGINGS: BlockId = 156;
+pub const IRON_BOOTS: BlockId = 157;
+pub const DIAMOND_HELMET: BlockId = 158;
+pub const DIAMOND_CHESTPLATE: BlockId = 159;
+pub const DIAMOND_LEGGINGS: BlockId = 160;
+pub const DIAMOND_BOOTS: BlockId = 161;
+pub const BUCKET: BlockId = 162;
+pub const WATER_BUCKET: BlockId = 163;
+pub const LAVA_BUCKET: BlockId = 164;
+pub const ITEM_END: BlockId = 165;
 
 /// An inventory stack: what, how many, and how worn (tools).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -379,20 +333,18 @@ impl Stack {
 }
 
 
-/// Tool tier 0..=3 and kind for picks, axes, shovels, hoes and swords.
+/// Tool tier 0..=3 and kind for picks, axes, shovels and hoes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tool {
     Pick,
     Axe,
     Shovel,
     Hoe,
-    Sword,
 }
 
 pub fn tool(id: BlockId) -> Option<(Tool, u8)> {
     match id {
         WOOD_PICK..=DIAMOND_PICK => Some((Tool::Pick, id - WOOD_PICK)),
-        WOOD_SWORD..=DIAMOND_SWORD => Some((Tool::Sword, id - WOOD_SWORD)),
         WOOD_AXE..=DIAMOND_AXE => Some((Tool::Axe, id - WOOD_AXE)),
         WOOD_SHOVEL..=DIAMOND_SHOVEL => Some((Tool::Shovel, id - WOOD_SHOVEL)),
         WOOD_HOE..=DIAMOND_HOE => Some((Tool::Hoe, id - WOOD_HOE)),
@@ -402,9 +354,6 @@ pub fn tool(id: BlockId) -> Option<(Tool, u8)> {
 
 /// Uses before a tool breaks (0: doesn't wear).
 pub fn max_durability(id: BlockId) -> u16 {
-    if id == BOW {
-        return 384;
-    }
     match tool(id) {
         Some((_, tier)) => [60, 132, 251, 1562][tier as usize],
         None => 0,
@@ -433,7 +382,7 @@ pub fn fuel_time(id: BlockId) -> f32 {
         LAVA_BUCKET => 400.0,
         PLANKS | OAK_LOG | BIRCH_LOG | SPRUCE_LOG | CRAFTING_TABLE | BOOKSHELF | CHEST | LADDER | DOOR => 15.0,
         STICK | SAPLING => 5.0,
-        WOOD_PICK | WOOD_SWORD | WOOD_AXE | WOOD_SHOVEL | WOOD_HOE | BOW => 10.0,
+        WOOD_PICK | WOOD_AXE | WOOD_SHOVEL | WOOD_HOE => 10.0,
         _ => 0.0,
     }
 }
@@ -556,27 +505,8 @@ pub fn item_name(id: BlockId) -> &'static str {
         DIAMOND_PICK => "Diamond Pickaxe",
         APPLE => "Apple",
         BREAD => "Bread",
-        WOOD_SWORD => "Wooden Sword",
-        STONE_SWORD => "Stone Sword",
-        IRON_SWORD => "Iron Sword",
-        DIAMOND_SWORD => "Diamond Sword",
         SEEDS => "Seeds",
         WHEAT => "Wheat",
-        RAW_PORK => "Raw Porkchop",
-        COOKED_PORK => "Cooked Porkchop",
-        RAW_BEEF => "Raw Beef",
-        STEAK => "Steak",
-        RAW_CHICKEN => "Raw Chicken",
-        COOKED_CHICKEN => "Cooked Chicken",
-        RAW_MUTTON => "Raw Mutton",
-        COOKED_MUTTON => "Cooked Mutton",
-        ROTTEN_FLESH => "Rotten Flesh",
-        BONE => "Bone",
-        STRING => "String",
-        FEATHER => "Feather",
-        LEATHER => "Leather",
-        ARROW => "Arrow",
-        BOW => "Bow",
         COPPER_INGOT => "Copper Ingot",
         WOOD_AXE..=DIAMOND_AXE => ["Wooden Axe", "Stone Axe", "Iron Axe", "Diamond Axe"][(id - WOOD_AXE) as usize],
         WOOD_SHOVEL..=DIAMOND_SHOVEL => ["Wooden Shovel", "Stone Shovel", "Iron Shovel", "Diamond Shovel"][(id - WOOD_SHOVEL) as usize],
@@ -592,8 +522,6 @@ pub fn item_name(id: BlockId) -> &'static str {
         BUCKET => "Bucket",
         WATER_BUCKET => "Water Bucket",
         LAVA_BUCKET => "Lava Bucket",
-        BONE_MEAL => "Bone Meal",
-        FLINT => "Flint",
         _ => def(id).name,
     }
 }
@@ -609,17 +537,8 @@ pub fn item_tile(id: BlockId) -> u8 {
         WOOD_PICK..=DIAMOND_PICK => tile::PICK + (id - WOOD_PICK),
         APPLE => tile::APPLE,
         BREAD => tile::BREAD,
-        WOOD_SWORD..=DIAMOND_SWORD => tile::SWORD + (id - WOOD_SWORD),
         SEEDS => tile::SEEDS,
         WHEAT => tile::WHEAT_ITEM,
-        RAW_PORK..=COOKED_MUTTON => tile::MEAT + (id - RAW_PORK),
-        ROTTEN_FLESH => tile::ROTTEN,
-        BONE => tile::BONE,
-        STRING => tile::STRING,
-        FEATHER => tile::FEATHER,
-        LEATHER => tile::LEATHER,
-        ARROW => tile::ARROW,
-        BOW => tile::BOW,
         COPPER_INGOT => tile::COPPER_INGOT,
         WOOD_AXE..=DIAMOND_AXE => tile::AXE + (id - WOOD_AXE),
         WOOD_SHOVEL..=DIAMOND_SHOVEL => tile::SHOVEL + (id - WOOD_SHOVEL),
@@ -631,8 +550,6 @@ pub fn item_tile(id: BlockId) -> u8 {
         BUCKET => tile::BUCKET,
         WATER_BUCKET => tile::WATER_BUCKET,
         LAVA_BUCKET => tile::LAVA_BUCKET,
-        BONE_MEAL => tile::BONE_MEAL,
-        FLINT => tile::FLINT,
         TORCH => tile::TORCH,
         DOOR => tile::DOOR_TOP,
         LADDER => tile::LADDER,
@@ -648,7 +565,7 @@ pub fn is_flat(id: BlockId) -> bool {
 }
 
 pub fn max_stack(id: BlockId) -> u8 {
-    if tool(id).is_some() || armor(id).is_some() || matches!(id, BOW | WATER_BUCKET | LAVA_BUCKET) {
+    if tool(id).is_some() || armor(id).is_some() || matches!(id, WATER_BUCKET | LAVA_BUCKET) {
         return 1;
     }
     match id {
@@ -662,11 +579,6 @@ pub fn food_value(id: BlockId) -> Option<f32> {
     Some(match id {
         APPLE => 4.0,
         BREAD => 5.0,
-        RAW_PORK | RAW_BEEF => 3.0,
-        RAW_CHICKEN | RAW_MUTTON => 2.0,
-        COOKED_PORK | STEAK => 8.0,
-        COOKED_CHICKEN | COOKED_MUTTON => 6.0,
-        ROTTEN_FLESH => 4.0,
         _ => return None,
     })
 }
@@ -694,7 +606,6 @@ pub fn tool_speed(held: BlockId, block: BlockId) -> f32 {
     let speed = [2.0, 4.0, 6.0, 8.0][tier as usize];
     match (kind, material(block)) {
         (Tool::Pick, Material::Rock) | (Tool::Axe, Material::Wood) | (Tool::Shovel, Material::Soil) => speed,
-        (Tool::Sword, _) if matches!(block, OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | CHERRY_LEAVES) => 3.0,
         _ => 1.0,
     }
 }
@@ -712,15 +623,6 @@ pub fn can_harvest(held: BlockId, block: BlockId) -> bool {
         _ => 1,
     };
     tier >= need
-}
-
-pub fn melee_damage(held: BlockId) -> f32 {
-    match tool(held) {
-        Some((Tool::Sword, t)) => 4.0 + t as f32,
-        Some((Tool::Axe, t)) => 3.0 + t as f32,
-        Some((_, t)) => 2.0 + t as f32 * 0.5,
-        None => 1.0,
-    }
 }
 
 #[inline]
@@ -753,6 +655,7 @@ mod tests {
         assert_eq!(fluid(fluid_block(0, 3)), Some((0, 3)));
         assert_eq!(fluid(fluid_block(1, 4)), Some((1, 4)));
         assert_eq!(item_name(DIAMOND_AXE), "Diamond Axe");
+        assert!((STICK..ITEM_END).all(|i| item_name(i) != "Air"), "every item has a name");
         assert_eq!(armor(DIAMOND_CHESTPLATE), Some((1, 8)));
         assert!((tile::COUNT) <= 256);
     }

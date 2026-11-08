@@ -1,5 +1,5 @@
 //! Game state and the per-frame update: networking, movement, mining, building, inventory,
-//! crafting, survival, creatures and weather.
+//! crafting, survival and weather.
 
 use crate::audio::{Audio, Sound};
 use crate::net::{self, Connection, NetEvent};
@@ -85,17 +85,11 @@ pub struct Other {
     pub held: u8,
 }
 
-pub struct EntityView {
-    pub kind: EntityKind,
+/// A dropped item stack, as the server last reported it.
+pub struct ItemView {
+    pub item: u8,
     pub target: Vec3,
     pub pos: Vec3,
-    pub yaw: f32,
-    pub pitch: f32,
-    pub walk: f32,
-    pub speed: f32,
-    pub hurt: bool,
-    pub item: u8,
-    pub sound_at: f64,
 }
 
 pub struct Particle {
@@ -183,9 +177,8 @@ pub struct State {
     pub break_cooldown: f32,
     pub use_cooldown: f32,
     pub target: Option<Hit>,
-    pub target_entity: Option<u32>,
     pub others: HashMap<PlayerId, Other>,
-    pub entities: HashMap<u32, EntityView>,
+    pub items: HashMap<u32, ItemView>,
     pub particles: Vec<Particle>,
     pub chat: Vec<ChatLine>,
     pub time_of_day: f32,
@@ -340,9 +333,8 @@ impl State {
             break_cooldown: 0.0,
             use_cooldown: 0.0,
             target: None,
-            target_entity: None,
             others: HashMap::new(),
-            entities: HashMap::new(),
+            items: HashMap::new(),
             particles: Vec::new(),
             chat: Vec::new(),
             time_of_day: 0.3,
@@ -398,7 +390,7 @@ impl State {
     fn connect_to(&mut self, addr: String) {
         self.world.clear();
         self.others.clear();
-        self.entities.clear();
+        self.items.clear();
         self.got_welcome = false;
         self.status = format!("Connecting to {addr}…");
         self.conn = Some(net::connect(addr, self.name.text.trim().to_string(), self.view_distance, self.skin, self.waker.clone()));
@@ -434,7 +426,6 @@ impl State {
             seed: self.seed_value(),
             motd: if lan { "LAN game".into() } else { "Single player".into() },
             max_view: 16,
-            mobs: true,
         };
         match runecraft_server::start(cfg) {
             Ok(server) => {
@@ -470,7 +461,7 @@ impl State {
         }
         self.world.clear();
         self.others.clear();
-        self.entities.clear();
+        self.items.clear();
         self.particles.clear();
         self.screen = Screen::Title;
         self.panel = Panel::None;
@@ -557,10 +548,6 @@ impl State {
         self.inv[self.selected]
     }
 
-    pub fn count(&self, id: BlockId) -> u32 {
-        self.inv.iter().flatten().filter(|s| s.id == id).map(|s| s.n as u32).sum()
-    }
-
     /// Adds a stack to the inventory; returns what didn't fit.
     pub fn give(&mut self, stack: Stack) -> Option<Stack> {
         let mut n = stack.n;
@@ -595,24 +582,6 @@ impl State {
         let from = self.body.eye() - Vec3::Y * 0.3;
         let vel = self.forward() * speed + Vec3::Y * 1.5;
         self.send(ToServer::Drop { stack, pos: from.to_array(), vel: vel.to_array() });
-    }
-
-    pub fn take(&mut self, id: BlockId, mut n: u32) {
-        for slot in self.inv.iter_mut().rev() {
-            if let Some(s) = slot
-                && s.id == id
-            {
-                let k = (s.n as u32).min(n);
-                s.n -= k as u8;
-                n -= k;
-                if s.n == 0 {
-                    *slot = None;
-                }
-                if n == 0 {
-                    return;
-                }
-            }
-        }
     }
 
     fn use_held(&mut self) {
@@ -1140,30 +1109,12 @@ impl State {
         self.inv[self.selected] = if s.n > n { Some(Stack { n: s.n - n, ..s }) } else { None };
     }
 
-    /// A press: hit a creature, or start breaking a block.
+    /// A press: start breaking the block you're looking at.
     fn mine_click(&mut self) {
         if !self.playing() {
             return;
         }
         self.swing = 1.0;
-        if let Some(id) = self.target_entity
-            && let Some(e) = self.entities.get(&id)
-            && e.kind.living()
-        {
-            let at = e.pos;
-            let mut dmg = block::melee_damage(self.held_item().map_or(0, |s| s.id));
-            // Critical hits while falling.
-            if self.body.vel.y < -1.0 && !self.body.on_ground {
-                dmg *= 1.5;
-                for _ in 0..8 {
-                    self.particle(at + Vec3::Y, block::tile::FLAME, 0.15, true);
-                }
-            }
-            self.send(ToServer::Attack { entity: id, damage: dmg });
-            self.sound(Sound::Hit, Some(at));
-            self.wear_held();
-            return;
-        }
         if self.mode == Mode::Creative {
             self.break_target();
             self.break_cooldown = 0.3;
@@ -1184,7 +1135,6 @@ impl State {
         let roll = unit(hash3(self.t.to_bits(), p.x, p.y, p.z));
         let one = |id: BlockId| vec![Stack::new(id, 1)];
         match b {
-            block::GRAVEL => one(if roll < 0.15 { block::FLINT } else { block::GRAVEL }),
             block::TALL_GRASS => {
                 if roll < 0.15 { one(block::SEEDS) } else { vec![] }
             }
@@ -1238,12 +1188,6 @@ impl State {
         }
         self.use_cooldown = 0.18;
         self.swing = 1.0;
-        if let Some(id) = self.target_entity
-            && self.entities.get(&id).is_some_and(|e| e.kind == EntityKind::Citizen)
-        {
-            self.send(ToServer::Interact { entity: id });
-            return;
-        }
         let held = self.held_item();
         if let Some(hit) = self.target
             && !self.shift
@@ -1261,7 +1205,6 @@ impl State {
             return;
         }
         match s.id {
-            block::BOW => return self.shoot(),
             block::BUCKET | block::WATER_BUCKET | block::LAVA_BUCKET => return self.use_bucket(s.id),
             id if block::armor(id).is_some() => {
                 let (slot, _) = block::armor(id).unwrap();
@@ -1286,14 +1229,6 @@ impl State {
                     self.set_block(p, block::WHEAT_0);
                     self.use_held();
                 }
-                return;
-            }
-            (block::BONE_MEAL, block::WHEAT_0..=block::WHEAT_2 | block::SAPLING) => {
-                self.send(ToServer::BoneMeal { pos: hit.pos.to_array() });
-                for _ in 0..6 {
-                    self.particle(hit.pos.as_vec3() + Vec3::splat(0.5), block::tile::GRASS_TOP, 0.1, true);
-                }
-                self.use_held();
                 return;
             }
             _ => {}
@@ -1448,22 +1383,6 @@ impl State {
         }
     }
 
-    fn shoot(&mut self) {
-        let has_arrow = self.mode == Mode::Creative || self.count(block::ARROW) > 0;
-        if !has_arrow {
-            self.say("You need arrows. Craft them from flint, a stick and a feather.");
-            return;
-        }
-        if self.mode == Mode::Survival {
-            self.take(block::ARROW, 1);
-        }
-        let dir = self.forward();
-        self.send(ToServer::Shoot { pos: (self.eye() + dir * 0.6).to_array(), vel: (dir * 32.0).to_array() });
-        self.sound(Sound::Bow, None);
-        self.wear_held();
-        self.use_cooldown = 0.6;
-    }
-
     // -----------------------------------------------------------------------------------------
     // Network
 
@@ -1569,7 +1488,16 @@ impl State {
                 self.body = Body::new(Vec3::from(pos));
                 self.mining = None;
             }
-            ToClient::Entities(list) => self.update_entities(list),
+            ToClient::Items(list) => {
+                let seen: HashSet<u32> = list.iter().map(|m| m.id).collect();
+                self.items.retain(|id, _| seen.contains(id));
+                for m in list {
+                    let p = Vec3::from(m.pos);
+                    let v = self.items.entry(m.id).or_insert(ItemView { item: m.item, target: p, pos: p });
+                    v.target = p;
+                    v.item = m.item;
+                }
+            }
             ToClient::Damage { amount, from } => {
                 let k = 1.0 - (self.armor_points() * 0.04).min(0.8);
                 self.hurt(amount * k);
@@ -1626,47 +1554,6 @@ impl State {
                 self.leave();
                 self.status = why;
             }
-        }
-    }
-
-    fn update_entities(&mut self, list: Vec<EntityState>) {
-        let seen: HashSet<u32> = list.iter().map(|m| m.id).collect();
-        self.entities.retain(|id, _| seen.contains(id));
-        let mut hurt_sounds = Vec::new();
-        for m in list {
-            let p = Vec3::from(m.pos);
-            let t = self.t;
-            let e = self.entities.entry(m.id).or_insert(EntityView {
-                kind: m.kind,
-                target: p,
-                pos: p,
-                yaw: m.yaw,
-                pitch: m.pitch,
-                walk: 0.0,
-                speed: 0.0,
-                hurt: false,
-                item: m.item,
-                sound_at: t + 4.0 + (m.id % 50) as f64 * 0.3,
-            });
-            if m.hurt && !e.hurt {
-                hurt_sounds.push((e.kind, e.pos));
-            }
-            e.target = p;
-            e.yaw = m.yaw;
-            e.pitch = m.pitch;
-            e.hurt = m.hurt;
-            e.item = m.item;
-        }
-        for (kind, pos) in hurt_sounds {
-            let s = match kind {
-                EntityKind::Pig => Sound::Oink,
-                EntityKind::Cow => Sound::Moo,
-                EntityKind::Sheep => Sound::Baa,
-                EntityKind::Chicken => Sound::Cluck,
-                EntityKind::Zombie => Sound::Growl,
-                _ => Sound::Hurt,
-            };
-            self.sound(s, Some(pos));
         }
     }
 
@@ -1849,26 +1736,10 @@ impl State {
         let eye = self.eye();
         let dir = self.forward();
         self.target = if self.screen == Screen::Playing { raycast(eye, dir, reach, &get) } else { None };
-        let limit = self.target.map_or(4.0f32, |h| h.dist).min(4.0);
-        self.target_entity = self
-            .entities
-            .iter()
-            .filter(|(_, e)| e.kind.living())
-            .filter_map(|(id, e)| {
-                let c = e.pos + Vec3::Y * if matches!(e.kind, EntityKind::Chicken | EntityKind::Spider) { 0.35 } else { 0.8 };
-                let t = (c - eye).dot(dir);
-                if t < 0.0 || t > limit {
-                    return None;
-                }
-                let r = if matches!(e.kind, EntityKind::Chicken) { 0.45 } else { 0.8 };
-                ((eye + dir * t).distance(c) < r).then_some((t, *id))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, id)| id);
     }
 
     fn step_mining(&mut self, dt: f32) {
-        if !self.look.down || self.look.dragging || !self.playing() || self.target_entity.is_some() {
+        if !self.look.down || self.look.dragging || !self.playing() {
             self.mining = None;
             return;
         }
@@ -2055,32 +1926,12 @@ impl State {
             o.speed += (v - o.speed) * k;
             o.walk += o.speed * dt * 1.6;
         }
-        let mut ambient: Vec<(EntityKind, Vec3)> = Vec::new();
-        for e in self.entities.values_mut() {
-            let before = e.pos;
-            if e.pos.distance(e.target) > 6.0 {
-                e.pos = e.target;
+        for it in self.items.values_mut() {
+            if it.pos.distance(it.target) > 6.0 {
+                it.pos = it.target;
             } else {
-                e.pos += (e.target - e.pos) * k;
+                it.pos += (it.target - it.pos) * k;
             }
-            let v = (e.pos - before).with_y(0.0).length() / dt.max(1e-3);
-            e.speed += (v - e.speed) * k;
-            e.walk += e.speed * dt * 2.0;
-            if self.t > e.sound_at {
-                e.sound_at = self.t + 8.0 + (e.pos.x.abs() % 10.0) as f64;
-                ambient.push((e.kind, e.pos));
-            }
-        }
-        for (kind, pos) in ambient {
-            let s = match kind {
-                EntityKind::Pig => Sound::Oink,
-                EntityKind::Cow => Sound::Moo,
-                EntityKind::Sheep => Sound::Baa,
-                EntityKind::Chicken => Sound::Cluck,
-                EntityKind::Zombie => Sound::Growl,
-                _ => continue,
-            };
-            self.sound(s, Some(pos));
         }
     }
 

@@ -180,10 +180,7 @@ impl Painter {
             self.set(8, i, hex(frame), 1.0);
         }
     }
-    fn sprite_tool(&mut self, head: u32, sword: bool) {
-        self.sprite_kind(head, if sword { 1 } else { 0 });
-    }
-    /// 0 pick, 1 sword, 2 axe, 3 shovel, 4 hoe.
+    /// 0 pick, 2 axe, 3 shovel, 4 hoe.
     fn sprite_kind(&mut self, head: u32, kind: u8) {
         self.clear();
         let handle = hex(0x7a5a32);
@@ -214,20 +211,12 @@ impl Painter {
             }
             return;
         }
-        let sword = kind == 1;
-        if sword {
-            self.line(3.0, 12.0, 5.0, 10.0, handle);
-            self.line(2.0, 9.0, 6.0, 13.0, mul(hex(head), 0.7));
-            self.line(5.0, 10.0, 13.0, 2.0, hex(head));
-            self.line(6.0, 10.0, 13.0, 3.0, mul(hex(head), 0.8));
-        } else {
-            self.line(3.0, 13.0, 11.0, 5.0, handle);
-            self.line(4.0, 13.0, 12.0, 5.0, mul(handle, 0.8));
-            self.line(5.0, 2.0, 13.0, 10.0, hex(head));
-            self.line(6.0, 2.0, 14.0, 10.0, mul(hex(head), 0.8));
-            self.line(6.0, 3.0, 12.0, 3.0, hex(head));
-            self.line(12.0, 3.0, 12.0, 9.0, hex(head));
-        }
+        self.line(3.0, 13.0, 11.0, 5.0, handle);
+        self.line(4.0, 13.0, 12.0, 5.0, mul(handle, 0.8));
+        self.line(5.0, 2.0, 13.0, 10.0, hex(head));
+        self.line(6.0, 2.0, 14.0, 10.0, mul(hex(head), 0.8));
+        self.line(6.0, 3.0, 12.0, 3.0, hex(head));
+        self.line(12.0, 3.0, 12.0, 9.0, hex(head));
     }
     fn face(&mut self, skin: u32, eyes: u32, hair: Option<u32>) {
         self.noise(skin, 0.06);
@@ -651,8 +640,7 @@ fn paint(id: u8) -> Painter {
                 }
             }
         }
-        _ if (t::PICK..t::PICK + 4).contains(&id) => p.sprite_tool([0xa07a45, 0x8a8a8a, 0xe5e5e5, 0x62e9e2][(id - t::PICK) as usize], false),
-        _ if (t::SWORD..t::SWORD + 4).contains(&id) => p.sprite_tool([0xa07a45, 0x8a8a8a, 0xe5e5e5, 0x62e9e2][(id - t::SWORD) as usize], true),
+        _ if (t::PICK..t::PICK + 4).contains(&id) => p.sprite_kind([0xa07a45, 0x8a8a8a, 0xe5e5e5, 0x62e9e2][(id - t::PICK) as usize], 0),
         t::APPLE => {
             p.clear();
             for y in 4..14 {
@@ -702,40 +690,6 @@ fn paint(id: u8) -> Painter {
             let skin = [0xf0c8a0, 0xd9a066, 0x9c6b3e, 0x5f3e24][(id - t::FACE) as usize];
             p.face(skin, [0x3060c0, 0x3a7a3a, 0x4a3020, 0x2a1a10][(id - t::FACE) as usize], Some(0x4a3020));
         }
-        t::PIG => p.noise(0xf0a0a8, 0.08),
-        t::PIG_FACE => {
-            p.noise(0xf0a0a8, 0.08);
-            for (x, y) in [(4, 5), (11, 5)] {
-                p.set(x, y, hex(0x222222), 1.0);
-            }
-            for y in 8..12 {
-                for x in 5..11 {
-                    p.set(x, y, hex(0xe07f8c), 1.0);
-                }
-            }
-            p.set(6, 10, hex(0x7a3a40), 1.0);
-            p.set(9, 10, hex(0x7a3a40), 1.0);
-        }
-        t::SHEEP => p.wool(0xeeeeea),
-        t::SHEEP_FACE => {
-            p.noise(0xc9b9a6, 0.08);
-            for x in 0..16 {
-                for y in 0..3 {
-                    p.set(x, y, hex(0xeeeeea), 1.0);
-                }
-            }
-            p.set(4, 7, hex(0x222222), 1.0);
-            p.set(11, 7, hex(0x222222), 1.0);
-            p.set(7, 11, hex(0x8a6a5a), 1.0);
-            p.set(8, 11, hex(0x8a6a5a), 1.0);
-        }
-        t::ZOMBIE => p.noise(0x5f9a52, 0.15),
-        t::ZOMBIE_FACE => {
-            p.face(0x5f9a52, 0x111111, Some(0x2f4a2a));
-            p.set(5, 7, hex(0x111111), 1.0);
-            p.set(10, 7, hex(0x111111), 1.0);
-        }
-
         t::TORCH => {
             p.clear();
             for y in 6..16 {
@@ -880,83 +834,6 @@ fn paint(id: u8) -> Painter {
             }
             p.line(5.0, 10.0, 12.0, 10.0, hex(0x8a6a2a));
         }
-        _ if (t::MEAT..t::MEAT + 8).contains(&id) => {
-            p.clear();
-            let k = (id - t::MEAT) as usize;
-            let raw = [0xe58080, 0xa0522d, 0xc2453a, 0x7a3a1f, 0xf0c0a0, 0xc88a4a, 0xd06060, 0x8a4a2a][k];
-            for y in 4..13 {
-                for x in 3..13 {
-                    if (x - 8) * (x - 8) * 2 + (y - 8) * (y - 8) * 3 < 50 {
-                        p.set(x, y, mul(hex(raw), 0.85 + p.r(x, y, 2) * 0.25), 1.0);
-                    }
-                }
-            }
-            p.line(11.0, 9.0, 14.0, 12.0, hex(0xeeeeee));
-        }
-        t::ROTTEN => {
-            p.clear();
-            for y in 4..13 {
-                for x in 3..13 {
-                    if (x - 8) * (x - 8) + (y - 8) * (y - 8) < 18 {
-                        p.set(x, y, mul(hex(0x7a7a3a), 0.7 + p.r(x, y, 2) * 0.5), 1.0);
-                    }
-                }
-            }
-        }
-        t::BONE => {
-            p.clear();
-            p.line(4.0, 12.0, 12.0, 4.0, hex(0xeeeeea));
-            p.line(5.0, 12.0, 12.0, 5.0, hex(0xd8d8d0));
-            for (x, y) in [(3, 12), (4, 13), (12, 3), (13, 4)] {
-                p.set(x, y, hex(0xf6f6f2), 1.0);
-            }
-        }
-        t::STRING => {
-            p.clear();
-            let mut x = 3.0f32;
-            for y in 2..14 {
-                x += ((y as f32) * 0.9).sin() * 0.8;
-                p.set(x as i32 + 4, y, hex(0xf2f2f2), 1.0);
-            }
-        }
-        t::FEATHER => {
-            p.clear();
-            p.line(4.0, 13.0, 12.0, 3.0, hex(0x9a9a9a));
-            for i in 0..8 {
-                let (x, y) = (5.0 + i as f32, 11.0 - i as f32 * 1.1);
-                p.line(x, y, x + 2.0, y - 2.5, hex(0xf5f5f5));
-            }
-        }
-        t::LEATHER => {
-            p.clear();
-            for y in 3..13 {
-                for x in 3..13 {
-                    if !((x == 3 || x == 12) && (y == 3 || y == 12)) {
-                        p.set(x, y, mul(hex(0x8a5a32), 0.85 + p.r(x, y, 2) * 0.2), 1.0);
-                    }
-                }
-            }
-        }
-        t::ARROW => {
-            p.clear();
-            p.line(3.0, 13.0, 12.0, 4.0, hex(0x8a6a3a));
-            for (x, y) in [(12, 3), (13, 3), (13, 4), (11, 3), (13, 5)] {
-                p.set(x, y, hex(0x9a9a9a), 1.0);
-            }
-            for (x, y) in [(2, 12), (3, 14), (2, 13), (4, 14)] {
-                p.set(x, y, hex(0xf2f2f2), 1.0);
-            }
-        }
-        t::BOW => {
-            p.clear();
-            for i in 0..14 {
-                let a = i as f32 / 13.0 * std::f32::consts::PI;
-                let (x, y) = (4.0 + a.sin() * 7.0, 1.0 + i as f32);
-                p.set(x as i32, y as i32, hex(0x7a5a32), 1.0);
-                p.set(x as i32 + 1, y as i32, hex(0x5e4426), 1.0);
-            }
-            p.line(4.0, 1.0, 4.0, 14.0, hex(0xe8e8e8));
-        }
         t::COPPER_INGOT => {
             p.clear();
             for y in 6..11 {
@@ -1004,93 +881,6 @@ fn paint(id: u8) -> Painter {
             }
             p.line(3.0, 4.0, 8.0, 1.0, hex(0x9a9a9a));
             p.line(8.0, 1.0, 13.0, 4.0, hex(0x9a9a9a));
-        }
-        t::BONE_MEAL => {
-            p.clear();
-            for i in 0..14 {
-                let (x, y) = (4 + (p.r(i, 0, 5) * 8.0) as i32, 5 + (p.r(i, 1, 5) * 7.0) as i32);
-                p.set(x, y, hex(0xf2f2ee), 1.0);
-            }
-        }
-        t::FLINT => {
-            p.clear();
-            for y in 4..13 {
-                for x in 4..12 {
-                    if x + y > 9 && x - y < 5 && y - x < 6 {
-                        p.set(x, y, mul(hex(0x3a3a3e), 0.8 + p.r(x, y, 2) * 0.5), 1.0);
-                    }
-                }
-            }
-        }
-        t::COW => {
-            p.noise(0xeeeeea, 0.05);
-            p.blobs(0x2a2622, 4, 9);
-            p.blobs(0x2a2622, 3, 12);
-        }
-        t::COW_FACE => {
-            p.noise(0xeeeeea, 0.05);
-            p.blobs(0x2a2622, 1, 9);
-            for (x, y) in [(4, 6), (11, 6)] {
-                p.set(x, y, hex(0x111111), 1.0);
-            }
-            for y in 10..14 {
-                for x in 4..12 {
-                    p.set(x, y, hex(0xe6a8a8), 1.0);
-                }
-            }
-            p.set(6, 12, hex(0x6a3a3a), 1.0);
-            p.set(9, 12, hex(0x6a3a3a), 1.0);
-        }
-        t::CHICKEN => p.noise(0xf6f6f2, 0.05),
-        t::CHICKEN_FACE => {
-            p.noise(0xf6f6f2, 0.05);
-            for (x, y) in [(4, 5), (11, 5)] {
-                p.set(x, y, hex(0x111111), 1.0);
-            }
-            for y in 7..10 {
-                for x in 6..10 {
-                    p.set(x, y, hex(0xf2b83a), 1.0);
-                }
-            }
-            for y in 10..13 {
-                for x in 7..9 {
-                    p.set(x, y, hex(0xd8282a), 1.0);
-                }
-            }
-        }
-        t::SKELETON => {
-            p.noise(0xc8c8c0, 0.08);
-            for y in (1..16).step_by(3) {
-                for x in 0..16 {
-                    p.set(x, y, hex(0x8a8a84), 1.0);
-                }
-            }
-        }
-        t::SKELETON_FACE => {
-            p.noise(0xd0d0c8, 0.06);
-            for (x0, y0) in [(3, 5), (10, 5)] {
-                for y in y0..y0 + 3 {
-                    for x in x0..x0 + 3 {
-                        p.set(x, y, hex(0x1a1a1a), 1.0);
-                    }
-                }
-            }
-            for x in 4..12 {
-                p.set(x, 11, hex(0x3a3a3a), 1.0);
-            }
-            for x in (4..12).step_by(2) {
-                p.set(x, 12, hex(0x3a3a3a), 1.0);
-            }
-        }
-        t::SPIDER => {
-            p.noise(0x2e2a28, 0.25);
-            p.specks(0x4a3e36, 0.15, 3);
-        }
-        t::SPIDER_FACE => {
-            p.noise(0x2e2a28, 0.2);
-            for (x, y) in [(4, 6), (5, 6), (10, 6), (11, 6), (6, 8), (9, 8), (3, 4), (12, 4)] {
-                p.set(x, y, hex(0xff2a2a), 1.0);
-            }
         }
         t::RAIN => {
             p.clear();

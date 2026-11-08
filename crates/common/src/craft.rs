@@ -95,7 +95,6 @@ const PICK: &[&str] = &["XXX", " S ", " S "];
 const AXE: &[&str] = &["XX", "XS", " S"];
 const SHOVEL: &[&str] = &["X", "S", "S"];
 const HOE: &[&str] = &["XX", " S", " S"];
-const SWORD: &[&str] = &["X", "X", "S"];
 const HELMET: &[&str] = &["XXX", "X X"];
 const CHESTPLATE: &[&str] = &["X X", "XXX", "XXX"];
 const LEGGINGS: &[&str] = &["XXX", "X X", "X X"];
@@ -112,16 +111,14 @@ pub static RECIPES: std::sync::LazyLock<Vec<Recipe>> = std::sync::LazyLock::new(
         shaped(DOOR, 3, &["PP", "PP", "PP"], &[P]),
         shaped(LADDER, 3, &["S S", "SSS", "S S"], &[S]),
         shaped(BED, 1, &["WWW", "PPP"], &[('W', AnyWool), P]),
-        shaped(BOW, 1, &[" TS", "T S", " TS"], &[('T', Item(STICK)), ('S', Item(STRING))]),
-        shaped(ARROW, 4, &["F", "S", "E"], &[('F', Item(FLINT)), S, ('E', Item(FEATHER))]),
         shaped(BUCKET, 1, &["I I", " I "], &[I]),
         shaped(BREAD, 1, &["WWW"], &[('W', Item(WHEAT))]),
         shaped(TNT, 1, &["SKS", "KSK", "SKS"], &[('S', Item(SAND)), ('K', Item(COAL))]),
         shaped(LANTERN, 1, &[" I ", "ITI", " I "], &[I, ('T', Item(TORCH))]),
         shaped(STONE_BRICK, 4, &["SS", "SS"], &[('S', Item(STONE))]),
         shaped(SANDSTONE, 1, &["SS", "SS"], &[('S', Item(SAND))]),
-        shaped(BOOKSHELF, 1, &["PPP", "LLL", "PPP"], &[P, ('L', Item(LEATHER))]),
-        shaped(WOOL_WHITE, 1, &["SS", "SS"], &[('S', Item(STRING))]),
+        shaped(BOOKSHELF, 1, &["PPP", "WWW", "PPP"], &[P, ('W', Item(WHEAT))]),
+        shaped(WOOL_WHITE, 1, &["WW", "WW"], &[('W', Item(WHEAT))]),
         shaped(RAIL, 16, &["I I", "ISI", "I I"], &[I, S]),
         shaped(IRON_BLOCK, 1, &["III", "III", "III"], &[I]),
         shaped(GOLD_BLOCK, 1, &["GGG", "GGG", "GGG"], &[G]),
@@ -132,13 +129,11 @@ pub static RECIPES: std::sync::LazyLock<Vec<Recipe>> = std::sync::LazyLock::new(
         Recipe { out: IRON_INGOT, count: 9, pattern: &["B"], key: &[('B', Item(IRON_BLOCK))], shapeless: true },
         Recipe { out: GOLD_INGOT, count: 9, pattern: &["B"], key: &[('B', Item(GOLD_BLOCK))], shapeless: true },
         Recipe { out: DIAMOND, count: 9, pattern: &["B"], key: &[('B', Item(DIAMOND_BLOCK))], shapeless: true },
-        Recipe { out: BONE_MEAL, count: 3, pattern: &["B"], key: &[('B', Item(BONE))], shapeless: true },
     ];
     r.extend(tools!(PICK, WOOD_PICK, STONE_PICK, IRON_PICK, DIAMOND_PICK));
     r.extend(tools!(AXE, WOOD_AXE, WOOD_AXE + 1, WOOD_AXE + 2, DIAMOND_AXE));
     r.extend(tools!(SHOVEL, WOOD_SHOVEL, WOOD_SHOVEL + 1, WOOD_SHOVEL + 2, DIAMOND_SHOVEL));
     r.extend(tools!(HOE, WOOD_HOE, WOOD_HOE + 1, WOOD_HOE + 2, DIAMOND_HOE));
-    r.extend(tools!(SWORD, WOOD_SWORD, STONE_SWORD, IRON_SWORD, DIAMOND_SWORD));
     for (pat, iron, dia) in [(HELMET, IRON_HELMET, DIAMOND_HELMET), (CHESTPLATE, IRON_CHESTPLATE, DIAMOND_CHESTPLATE), (LEGGINGS, IRON_LEGGINGS, DIAMOND_LEGGINGS), (BOOTS, IRON_BOOTS, DIAMOND_BOOTS)] {
         r.push(shaped(iron, 1, pat, &[('X', Item(IRON_INGOT))]));
         r.push(shaped(dia, 1, pat, &[('X', Item(DIAMOND))]));
@@ -199,10 +194,6 @@ pub fn smelt(id: BlockId) -> Option<BlockId> {
         COBBLE => STONE,
         CLAY => BRICK,
         OAK_LOG | BIRCH_LOG | SPRUCE_LOG => COAL,
-        RAW_PORK => COOKED_PORK,
-        RAW_BEEF => STEAK,
-        RAW_CHICKEN => COOKED_CHICKEN,
-        RAW_MUTTON => COOKED_MUTTON,
         CACTUS => WOOL_GREEN,
         STONE => STONE_BRICK,
         _ => return None,

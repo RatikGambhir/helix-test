@@ -1,0 +1,71 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUNECRAFT_MUTE: "1"
+
+jobs:
+  macos:
+    name: macOS app
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace
+      - name: Build RuneCraft.app (Apple Silicon + Intel)
+        run: packaging/macos/build-app.sh
+      - name: Render a frame on the Mac's GPU
+        continue-on-error: true
+        run: target/RuneCraft.app/Contents/MacOS/runecraft --snap target/macos-screenshot.png --scene play --size 1280x800
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RuneCraft-macOS
+          path: target/RuneCraft-macOS.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-screenshot
+          path: target/macos-screenshot.png
+          if-no-files-found: ignore
+
+  linux:
+    name: Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libasound2-dev mesa-vulkan-drivers
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace
+      - name: Build
+        run: cargo build --release -p runecraft -p runecraft-server
+      - name: Package
+        run: tar -czf RuneCraft-linux.tar.gz -C target/release runecraft runecraft-server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RuneCraft-linux
+          path: RuneCraft-linux.tar.gz
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release -p runecraft -p runecraft-server
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path target/release/runecraft.exe, target/release/runecraft-server.exe -DestinationPath RuneCraft-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RuneCraft-windows
+          path: RuneCraft-windows.zip

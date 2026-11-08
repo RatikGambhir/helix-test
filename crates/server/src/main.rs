@@ -1,4 +1,4 @@
-//! Dedicated server: `runecraft-server [--port 25575] [--world worlds/world] [--seed N] [--view 12] [--no-mobs]`.
+//! Dedicated server: `runecraft-server [--port 25575] [--world worlds/world] [--seed N] [--view 12]`.
 
 use runecraft_server::{Config, start};
 use std::path::PathBuf;
@@ -14,9 +14,8 @@ fn main() {
             "--seed" => cfg.seed = args.next().and_then(|v| v.parse().ok()).unwrap_or(cfg.seed),
             "--view" => cfg.max_view = args.next().and_then(|v| v.parse().ok()).unwrap_or(cfg.max_view),
             "--motd" => cfg.motd = args.next().unwrap_or_default(),
-            "--no-mobs" => cfg.mobs = false,
             "-h" | "--help" => {
-                println!("runecraft-server [--port 25575] [--world worlds/world] [--seed N] [--view 12] [--motd TEXT] [--no-mobs]");
+                println!("runecraft-server [--port 25575] [--world worlds/world] [--seed N] [--view 12] [--motd TEXT]");
                 return;
             }
             other => eprintln!("ignoring unknown argument {other}"),

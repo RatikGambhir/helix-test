@@ -1,13 +1,13 @@
-//! The RuneCraft server: owns the world, streams chunks, relays players, simulates creatures,
-//! items, arrows, fluids, crops, furnaces and weather, and saves everything to disk. Runs as its
-//! own binary or inside the client for single player and LAN games.
+//! The RuneCraft server: owns the world, streams chunks, relays players, simulates dropped
+//! items, fluids, crops, furnaces and weather, and saves everything to disk. Runs as its own
+//! binary or inside the client for single player and LAN games.
 
 mod containers;
-mod entities;
 mod fluids;
+mod items;
 
 use containers::Container;
-use entities::Entity;
+use items::Item;
 use runecraft_common::block::{self, BlockId, Stack};
 use runecraft_common::chunk::{self, CHUNK, Column, HEIGHT};
 use runecraft_common::city::CITIES;
@@ -36,7 +36,6 @@ pub struct Config {
     pub seed: u64,
     pub motd: String,
     pub max_view: u8,
-    pub mobs: bool,
 }
 
 impl Default for Config {
@@ -47,7 +46,6 @@ impl Default for Config {
             seed: 0x5EED,
             motd: "Welcome to RuneCraft!".into(),
             max_view: 12,
-            mobs: true,
         }
     }
 }
@@ -160,7 +158,7 @@ fn write_loop(stream: TcpStream, rx: Receiver<Arc<Vec<u8>>>) {
     let _ = w.get_ref().shutdown(std::net::Shutdown::Both);
 }
 
-const SAVE_VERSION: u32 = 2;
+const SAVE_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Default)]
 struct Save {
@@ -181,7 +179,6 @@ pub(crate) struct Player {
     out: Sender<Arc<Vec<u8>>>,
     view: u8,
     sent: HashSet<(i32, i32)>,
-    hurt_cooldown: f32,
     held: u8,
     sleeping: bool,
     open: Option<[i32; 3]>,
@@ -218,8 +215,9 @@ pub(crate) struct World {
     jobs: Sender<(i32, i32)>,
     done: Receiver<(i32, i32, Column)>,
     players: HashMap<u32, Player>,
-    entities: HashMap<u32, Entity>,
-    next_entity: u32,
+    items: HashMap<u32, Item>,
+    next_item: u32,
+    merge_clock: f32,
     containers: HashMap<[i32; 3], Container>,
     fluid_active: HashSet<[i32; 3]>,
     fluid_clock: (f32, f32),
@@ -280,8 +278,9 @@ impl World {
             jobs,
             done,
             players: HashMap::new(),
-            entities: HashMap::new(),
-            next_entity: 1,
+            items: HashMap::new(),
+            next_item: 1,
+            merge_clock: 0.0,
             containers: save.containers.into_iter().collect(),
             fluid_active: HashSet::new(),
             fluid_clock: (0.0, 0.0),
@@ -328,7 +327,6 @@ impl World {
         let mut last = Instant::now();
         let mut since_save = 0.0f32;
         let mut since_time = 0.0f32;
-        let mut since_spawn = 0.0f32;
         let mut since_gc = 0.0f32;
         let mut since_grow = 0.0f32;
         while !stop.load(Ordering::SeqCst) {
@@ -374,16 +372,11 @@ impl World {
             self.tick_fluids(dt);
             self.tick_containers(dt);
             self.tick_weather(dt);
-            self.tick_entities(dt);
+            self.tick_items(dt);
             since_grow += dt;
             if since_grow > 1.0 {
                 since_grow = 0.0;
                 self.tick_growth();
-            }
-            since_spawn += dt;
-            if since_spawn > 1.0 {
-                since_spawn = 0.0;
-                self.spawn_creatures();
             }
             since_gc += dt;
             if since_gc > 10.0 {
@@ -452,7 +445,6 @@ impl World {
                     out,
                     view: view.clamp(2, self.cfg.max_view),
                     sent: HashSet::new(),
-                    hurt_cooldown: 0.0,
                     held: 0,
                     sleeping: false,
                     open: None,
@@ -521,8 +513,6 @@ impl World {
                     self.fuses.push((3.0, pos));
                 }
             }
-            ToServer::Attack { entity, damage } => self.attack(conn, entity, damage),
-            ToServer::Interact { entity } => self.interact(conn, entity),
             ToServer::ViewDistance(v) => {
                 let max = self.cfg.max_view;
                 if let Some(p) = self.players.get_mut(&conn) {
@@ -537,7 +527,6 @@ impl World {
                     self.spawn_item(stack, Vec3::from(pos), Vec3::from(vel), delay);
                 }
             }
-            ToServer::Shoot { pos, vel } => self.spawn_arrow(Vec3::from(pos), Vec3::from(vel), Some(conn), true),
             ToServer::OpenContainer { pos } => self.open_container(conn, pos),
             ToServer::ContainerSet { pos, slot, stack } => self.set_container_slot(pos, slot, stack),
             ToServer::CloseContainer => {
@@ -546,7 +535,6 @@ impl World {
                 }
             }
             ToServer::Sleep(bed) => self.sleep(conn, bed),
-            ToServer::BoneMeal { pos } => self.grow(pos, true),
             ToServer::Held(item) => {
                 if let Some(p) = self.players.get_mut(&conn) {
                     p.held = item;
@@ -828,10 +816,6 @@ impl World {
                 p.send(&ToClient::Damage { amount: (8.0 - d) * 2.5, from: centre.to_array() });
             }
         }
-        let hits: Vec<u32> = self.entities.iter().filter(|(_, e)| e.body.pos.distance(centre) < 5.0 && e.kind.living()).map(|(id, _)| *id).collect();
-        for id in hits {
-            self.hurt_entity(id, 12.0, centre);
-        }
     }
 
     pub(crate) fn is_night(&self) -> bool {
@@ -889,18 +873,17 @@ impl World {
             }
             let chance = if self.get(pos[0], pos[1], pos[2]) == block::SAPLING { 1.0 / 90.0 } else { 1.0 / 25.0 };
             if self.rand() < chance {
-                self.grow(pos, false);
+                self.grow(pos);
             }
         }
     }
 
     /// Advances a crop a stage or turns a sapling into a tree.
-    fn grow(&mut self, pos: [i32; 3], bone_meal: bool) {
+    fn grow(&mut self, pos: [i32; 3]) {
         let b = self.get(pos[0], pos[1], pos[2]);
         match b {
             block::WHEAT_0..=block::WHEAT_2 => {
-                let step = if bone_meal { 2 } else { 1 };
-                let next = (b + step).min(block::WHEAT_3);
+                let next = (b + 1).min(block::WHEAT_3);
                 self.set_block(pos, next);
                 if next != block::WHEAT_3 {
                     self.growing.insert(pos);
@@ -967,7 +950,7 @@ mod tests {
     fn a_client_joins_gets_chunks_and_sees_its_edit() {
         let dir = std::env::temp_dir().join(format!("runecraft-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let cfg = Config { bind: "127.0.0.1:0".into(), world_dir: dir.clone(), mobs: false, ..Default::default() };
+        let cfg = Config { bind: "127.0.0.1:0".into(), world_dir: dir.clone(), ..Default::default() };
         let mut server = start(cfg).unwrap();
         let mut s = TcpStream::connect(server.addr).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
@@ -1012,7 +995,7 @@ mod tests {
     #[test]
     fn water_flows_down_and_out() {
         let dir = std::env::temp_dir().join(format!("runecraft-fluid-{}", std::process::id()));
-        let cfg = Config { world_dir: dir, mobs: false, ..Default::default() };
+        let cfg = Config { world_dir: dir, ..Default::default() };
         let mut w = World::open(cfg);
         let mut col = Column::default();
         for x in 0..16 {
