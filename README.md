@@ -1,4 +1,4 @@
-# Cubeterra
+# RuneCraft
 
 A multiplayer block-building sandbox written in Rust with the [Rune](https://github.com/anomalyco/rune) UI framework. Explore an endless generated world, mine and build, survive the night, and travel to block-built versions of **New York, Tokyo, Paris and London** with your friends.
 
@@ -23,14 +23,14 @@ Use `--release`: the first build takes a few minutes, and debug builds are notic
 
 On the title screen:
 
-- **Play** opens (or creates) a world on your computer. Worlds save automatically to `~/.cubeterra/worlds/<name>`.
+- **Play** opens (or creates) a world on your computer. Worlds save automatically to `~/.runecraft/worlds/<name>`.
 - **Host on LAN** does the same and lets people on your network join. Your LAN address shows in the top right corner in game.
 - **Join Server** connects to a friend's LAN game or a dedicated server (`host` or `host:port`, default port 25575).
 
 ### Dedicated server
 
 ```sh
-cargo run --release -p cubeterra-server -- --port 25575 --world worlds/main --seed 1234
+cargo run --release -p runecraft-server -- --port 25575 --world worlds/main --seed 1234
 ```
 
 Options: `--port`, `--world <dir>`, `--seed <n>` (new worlds only), `--view <chunks>`, `--motd <text>`, `--no-mobs`. Press Enter in the terminal to save and stop. To play over the internet, forward TCP port 25575 on your router to the server machine.
@@ -81,7 +81,7 @@ crates/server   The authoritative server (also embedded in the client for single
 crates/client   The game: a Rune app with a custom 3D renderer.
 ```
 
-**Rune** draws all the 2D interface: title screen, HUD, hotbar, inventory, crafting, travel and pause menus, chat and name tags, and handles keyboard and pointer input. Rune is a 2D UI framework, so the 3D world is drawn by Cubeterra's own wgpu renderer, plugged in through Rune's `Compositor` hook (`crates/client/src/render.rs`): each frame it draws the sky, chunk meshes, water, players and mobs into the window, then asks Rune to draw the interface on top.
+**Rune** draws all the 2D interface: title screen, HUD, hotbar, inventory, crafting, travel and pause menus, chat and name tags, and handles keyboard and pointer input. Rune is a 2D UI framework, so the 3D world is drawn by RuneCraft's own wgpu renderer, plugged in through Rune's `Compositor` hook (`crates/client/src/render.rs`): each frame it draws the sky, chunk meshes, water, players and mobs into the window, then asks Rune to draw the interface on top.
 
 The world is stored in 16×16×256 columns. The server generates them on worker threads and streams them run-length encoded over TCP (length-prefixed bincode frames). The client meshes 16³ sections on worker threads with flood-filled sky and block light, smooth lighting and ambient occlusion.
 

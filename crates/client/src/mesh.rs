@@ -2,8 +2,8 @@
 //! light, smooth per-vertex lighting and ambient occlusion.
 
 use bytemuck::{Pod, Zeroable};
-use cubeterra_common::block::{self, AIR, BlockId, Kind, WATER};
-use cubeterra_common::chunk::{CHUNK, Column, HEIGHT};
+use runecraft_common::block::{self, AIR, BlockId, Kind, WATER};
+use runecraft_common::chunk::{CHUNK, Column, HEIGHT};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};

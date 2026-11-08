@@ -1,8 +1,8 @@
 //! Every texture in the game is painted here in code: a 256×256 atlas of 16×16 tiles, plus
 //! inventory icons drawn from it.
 
-use cubeterra_common::block::{self, BlockId, Kind, tile as t};
-use cubeterra_common::noise::{hash3, unit};
+use runecraft_common::block::{self, BlockId, Kind, tile as t};
+use runecraft_common::noise::{hash3, unit};
 
 pub const TILE: usize = 16;
 pub const PER_ROW: usize = 16;

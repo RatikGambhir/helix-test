@@ -1,4 +1,4 @@
-//! Cubeterra: a multiplayer block-building game with real cities, built on the Rune UI
+//! RuneCraft: a multiplayer block-building game with real cities, built on the Rune UI
 //! framework. Rune draws the menus and HUD; the 3D world is drawn by our own wgpu renderer
 //! plugged in as Rune's compositor.
 
@@ -79,18 +79,18 @@ fn friend_scene(s: &mut State) {
     let mut at = s.body.pos + fwd * 4.0 + glam::Vec3::new(fwd.z, 0.0, -fwd.x) * 1.0;
     let col = at.floor().as_ivec3();
     let mut y = 250;
-    while y > 0 && !cubeterra_common::block::is_opaque(s.world.get(col.x, y, col.z)) {
+    while y > 0 && !runecraft_common::block::is_opaque(s.world.get(col.x, y, col.z)) {
         y -= 1;
     }
     at.y = y as f32 + 1.0;
     let face = s.yaw + std::f32::consts::PI;
     std::thread::spawn(move || {
-        use cubeterra_common::net::{read_frame, write_frame};
-        use cubeterra_common::protocol::*;
+        use runecraft_common::net::{read_frame, write_frame};
+        use runecraft_common::protocol::*;
         let Ok(mut out) = std::net::TcpStream::connect(addr) else { return };
         let mut inp = std::io::BufReader::new(out.try_clone().unwrap());
         std::thread::spawn(move || while read_frame::<ToClient, _>(&mut inp).is_ok() {});
-        let _ = write_frame(&mut out, &ToServer::Hello { name: "Yuki".into(), version: cubeterra_common::PROTOCOL_VERSION, view_distance: 2, skin: 13 });
+        let _ = write_frame(&mut out, &ToServer::Hello { name: "Yuki".into(), version: runecraft_common::PROTOCOL_VERSION, view_distance: 2, skin: 13 });
         for _ in 0..1200 {
             let _ = write_frame(&mut out, &ToServer::Move(Pose { pos: at.to_array(), yaw: face, pitch: 0.1 }));
             std::thread::sleep(Duration::from_millis(100));
@@ -108,11 +108,11 @@ fn friend_scene(s: &mut State) {
 }
 
 fn city(i: usize) -> (f32, f32, f32) {
-    cubeterra_common::city::CITIES[i].arrival()
+    runecraft_common::city::CITIES[i].arrival()
 }
 
 fn main() {
-    rune::set_app_id("cubeterra");
+    rune::set_app_id("runecraft");
     let spec = AppSpec {
         min_size: Some((820.0, 560.0)),
         setup: Some(setup),
@@ -134,8 +134,8 @@ fn main() {
                 play_and_wait(s, None, 0.6, -0.15, 0.3);
                 s.mode = game::Mode::Survival;
                 s.inv = [None; game::INV];
-                s.give(cubeterra_common::block::OAK_LOG, 6);
-                s.give(cubeterra_common::block::COBBLE, 12);
+                s.give(runecraft_common::block::OAK_LOG, 6);
+                s.give(runecraft_common::block::COBBLE, 12);
                 s.health = 15.0;
                 s.panel = game::Panel::Inventory;
             }),
@@ -144,7 +144,7 @@ fn main() {
                 s.panel = game::Panel::Travel;
             }),
         ],
-        ..AppSpec::new("Cubeterra", (1280.0, 800.0), State::new, ui::view)
+        ..AppSpec::new("RuneCraft", (1280.0, 800.0), State::new, ui::view)
     };
     App::new(spec).modifier_keys().compositor(render::Gfx::default()).run();
 }
@@ -152,7 +152,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cubeterra_common::block;
+    use runecraft_common::block;
 
     fn pump(states: &mut [&mut State], t: &mut f64, until: impl Fn(&[&mut State]) -> bool) -> bool {
         let start = Instant::now();
@@ -171,10 +171,10 @@ mod tests {
 
     #[test]
     fn two_players_walk_build_and_chat_together() {
-        let dir = std::env::temp_dir().join(format!("cubeterra-mp-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("runecraft-mp-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let cfg = cubeterra_server::Config { bind: "127.0.0.1:0".into(), world_dir: dir.clone(), mobs: false, seed: 99, ..Default::default() };
-        let server = cubeterra_server::start(cfg).unwrap();
+        let cfg = runecraft_server::Config { bind: "127.0.0.1:0".into(), world_dir: dir.clone(), mobs: false, seed: 99, ..Default::default() };
+        let server = runecraft_server::start(cfg).unwrap();
         let mut a = State::new();
         let mut b = State::new();
         for (s, n) in [(&mut a, "alice"), (&mut b, "bob")] {

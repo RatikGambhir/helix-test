@@ -3,9 +3,9 @@
 
 use crate::game::{Mode, Screen, State};
 use crate::mesh::{SectionKey, Vertex, tile_uv};
-use cubeterra_common::block::tile;
-use cubeterra_common::chunk::CHUNK;
-use cubeterra_common::protocol::MobKind;
+use runecraft_common::block::tile;
+use runecraft_common::chunk::CHUNK;
+use runecraft_common::protocol::MobKind;
 use glam::{Mat4, Vec3, Vec4};
 use rune::compose::{Compositor, DeviceKey, Frame};
 use std::collections::HashMap;
@@ -313,11 +313,11 @@ impl Compositor<State> for Gfx {
             top = mixv(top, Vec3::new(0.35, 0.3, 0.55), dusk * 0.3);
             let underwater = {
                 let e = eye.floor().as_ivec3();
-                s.world.get(e.x, e.y, e.z) == cubeterra_common::block::WATER
+                s.world.get(e.x, e.y, e.z) == runecraft_common::block::WATER
             };
             let in_lava = {
                 let e = eye.floor().as_ivec3();
-                s.world.get(e.x, e.y, e.z) == cubeterra_common::block::LAVA
+                s.world.get(e.x, e.y, e.z) == runecraft_common::block::LAVA
             };
             let far = (s.view_distance as f32 - 1.0) * CHUNK as f32;
             let (fog, near, far) = if in_lava {

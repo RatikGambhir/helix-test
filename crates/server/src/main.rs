@@ -1,11 +1,11 @@
-//! Dedicated server: `cubeterra-server [--port 25575] [--world worlds/world] [--seed N] [--view 12] [--no-mobs]`.
+//! Dedicated server: `runecraft-server [--port 25575] [--world worlds/world] [--seed N] [--view 12] [--no-mobs]`.
 
-use cubeterra_server::{Config, start};
+use runecraft_server::{Config, start};
 use std::path::PathBuf;
 
 fn main() {
     let mut cfg = Config::default();
-    let mut port = cubeterra_common::DEFAULT_PORT;
+    let mut port = runecraft_common::DEFAULT_PORT;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -16,7 +16,7 @@ fn main() {
             "--motd" => cfg.motd = args.next().unwrap_or_default(),
             "--no-mobs" => cfg.mobs = false,
             "-h" | "--help" => {
-                println!("cubeterra-server [--port 25575] [--world worlds/world] [--seed N] [--view 12] [--motd TEXT] [--no-mobs]");
+                println!("runecraft-server [--port 25575] [--world worlds/world] [--seed N] [--view 12] [--motd TEXT] [--no-mobs]");
                 return;
             }
             other => eprintln!("ignoring unknown argument {other}"),
@@ -30,7 +30,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    println!("Cubeterra server listening on port {port} (world: {})", cfg.world_dir.display());
+    println!("RuneCraft server listening on port {port} (world: {})", cfg.world_dir.display());
     println!("Press Enter to stop and save.");
     let mut line = String::new();
     let _ = std::io::stdin().read_line(&mut line);

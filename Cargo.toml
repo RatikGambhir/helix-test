@@ -8,8 +8,8 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
-cubeterra-common = { path = "crates/common" }
-cubeterra-server = { path = "crates/server" }
+runecraft-common = { path = "crates/common" }
+runecraft-server = { path = "crates/server" }
 serde = { version = "1", features = ["derive"] }
 bincode = { version = "1.3" }
 glam = { version = "0.30", features = ["bytemuck"] }

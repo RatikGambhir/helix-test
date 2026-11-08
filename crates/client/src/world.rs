@@ -1,8 +1,8 @@
 //! The client's copy of the world: columns from the server, and which sections need meshing.
 
 use crate::mesh::{Job, Mesher, Output, SectionKey};
-use cubeterra_common::block::{self, AIR, BlockId};
-use cubeterra_common::chunk::{self, CHUNK, Column, SECTIONS};
+use runecraft_common::block::{self, AIR, BlockId};
+use runecraft_common::chunk::{self, CHUNK, Column, SECTIONS};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 

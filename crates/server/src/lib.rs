@@ -1,15 +1,15 @@
-//! The Cubeterra server: owns the world, streams chunks, relays players, runs mobs and TNT, and
+//! The RuneCraft server: owns the world, streams chunks, relays players, runs mobs and TNT, and
 //! saves edits to disk. Runs as its own binary or inside the client for single player and LAN.
 
-use cubeterra_common::block::{self, BlockId};
-use cubeterra_common::chunk::{self, CHUNK, Column, HEIGHT};
-use cubeterra_common::city::CITIES;
-use cubeterra_common::net::{encode_frame, read_frame};
-use cubeterra_common::noise::{hash, unit};
-use cubeterra_common::physics::{self, Body};
-use cubeterra_common::protocol::*;
-use cubeterra_common::worldgen;
-use cubeterra_common::{DAY_LENGTH, PROTOCOL_VERSION};
+use runecraft_common::block::{self, BlockId};
+use runecraft_common::chunk::{self, CHUNK, Column, HEIGHT};
+use runecraft_common::city::CITIES;
+use runecraft_common::net::{encode_frame, read_frame};
+use runecraft_common::noise::{hash, unit};
+use runecraft_common::physics::{self, Body};
+use runecraft_common::protocol::*;
+use runecraft_common::worldgen;
+use runecraft_common::{DAY_LENGTH, PROTOCOL_VERSION};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -36,10 +36,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            bind: format!("0.0.0.0:{}", cubeterra_common::DEFAULT_PORT),
+            bind: format!("0.0.0.0:{}", runecraft_common::DEFAULT_PORT),
             world_dir: PathBuf::from("worlds/world"),
             seed: 0x5EED,
-            motd: "Welcome to Cubeterra!".into(),
+            motd: "Welcome to RuneCraft!".into(),
             max_view: 12,
             mobs: true,
         }
@@ -706,7 +706,7 @@ impl World {
             } else {
                 continue;
             };
-            if !matches!(cubeterra_common::city::zone(x, z), cubeterra_common::city::Zone::None) && kind != MobKind::Zombie {
+            if !matches!(runecraft_common::city::zone(x, z), runecraft_common::city::Zone::None) && kind != MobKind::Zombie {
                 continue;
             }
             let id = self.next_mob;
@@ -806,11 +806,11 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cubeterra_common::net::write_frame;
+    use runecraft_common::net::write_frame;
 
     #[test]
     fn a_client_joins_gets_chunks_and_sees_its_edit() {
-        let dir = std::env::temp_dir().join(format!("cubeterra-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("runecraft-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let cfg = Config { bind: "127.0.0.1:0".into(), world_dir: dir.clone(), mobs: false, ..Default::default() };
         let mut server = start(cfg).unwrap();

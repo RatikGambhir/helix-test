@@ -674,37 +674,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
-name = "cubeterra"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "cubeterra-common",
- "cubeterra-server",
- "glam",
- "rune",
- "wgpu",
-]
-
-[[package]]
-name = "cubeterra-common"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "glam",
- "serde",
-]
-
-[[package]]
-name = "cubeterra-server"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "cubeterra-common",
- "glam",
- "serde",
-]
-
-[[package]]
 name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2659,6 +2628,37 @@ version = "0.0.1"
 source = "git+https://github.com/anomalyco/rune?rev=3032900c3f492c2e7bfee69ccbaf20a6244ecc85#3032900c3f492c2e7bfee69ccbaf20a6244ecc85"
 dependencies = [
  "taffy",
+]
+
+[[package]]
+name = "runecraft"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "rune",
+ "runecraft-common",
+ "runecraft-server",
+ "wgpu",
+]
+
+[[package]]
+name = "runecraft-common"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "glam",
+ "serde",
+]
+
+[[package]]
+name = "runecraft-server"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "glam",
+ "runecraft-common",
+ "serde",
 ]
 
 [[package]]

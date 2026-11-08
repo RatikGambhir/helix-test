@@ -1,5 +1,5 @@
 [package]
-name = "cubeterra-server"
+name = "runecraft-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,11 +8,11 @@ license.workspace = true
 path = "src/lib.rs"
 
 [[bin]]
-name = "cubeterra-server"
+name = "runecraft-server"
 path = "src/main.rs"
 
 [dependencies]
-cubeterra-common.workspace = true
+runecraft-common.workspace = true
 serde.workspace = true
 bincode.workspace = true
 glam.workspace = true

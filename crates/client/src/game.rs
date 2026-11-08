@@ -3,12 +3,12 @@
 use crate::net::{self, Connection, NetEvent};
 use crate::textures::{self, Atlas};
 use crate::world::World;
-use cubeterra_common::block::{self, BlockId};
-use cubeterra_common::chunk::{CHUNK, Column, HEIGHT};
-use cubeterra_common::city::CITIES;
-use cubeterra_common::craft::{RECIPES, Recipe, Station};
-use cubeterra_common::physics::{self, Body, Hit, raycast};
-use cubeterra_common::protocol::*;
+use runecraft_common::block::{self, BlockId};
+use runecraft_common::chunk::{CHUNK, Column, HEIGHT};
+use runecraft_common::city::CITIES;
+use runecraft_common::craft::{RECIPES, Recipe, Station};
+use runecraft_common::physics::{self, Body, Hit, raycast};
+use runecraft_common::protocol::*;
 use glam::{IVec3, Mat4, Vec3};
 use rune::{Pixels, TextEdit};
 use std::collections::{HashMap, HashSet};
@@ -91,7 +91,7 @@ pub struct State {
     pub seed_text: TextEdit,
     pub chat_edit: TextEdit,
     pub status: String,
-    pub server: Option<cubeterra_server::Server>,
+    pub server: Option<runecraft_server::Server>,
     pub lan: bool,
     pub conn: Option<Connection>,
     pub waker: Option<rune::Waker>,
@@ -154,8 +154,8 @@ pub struct State {
 fn data_dir() -> PathBuf {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
     match home {
-        Some(h) => PathBuf::from(h).join(".cubeterra"),
-        None => PathBuf::from("cubeterra-data"),
+        Some(h) => PathBuf::from(h).join(".runecraft"),
+        None => PathBuf::from("runecraft-data"),
     }
 }
 
@@ -257,7 +257,7 @@ impl State {
         self.mobs.clear();
         self.got_welcome = false;
         self.status = format!("Connecting to {addr}…");
-        self.skin = (cubeterra_common::noise::hash(self.name.text.len() as u64 ^ self.name.text.bytes().map(|b| b as u64).sum::<u64>()) % 32) as u8;
+        self.skin = (runecraft_common::noise::hash(self.name.text.len() as u64 ^ self.name.text.bytes().map(|b| b as u64).sum::<u64>()) % 32) as u8;
         self.conn = Some(net::connect(addr, self.name.text.trim().to_string(), self.view_distance, self.skin, self.waker.clone()));
         self.screen = Screen::Connecting;
         self.panel = Panel::None;
@@ -279,8 +279,8 @@ impl State {
     /// Starts a server inside the game (127.0.0.1 only, or on the LAN) and joins it.
     pub fn host(&mut self, lan: bool) {
         self.leave();
-        let port = if lan { cubeterra_common::DEFAULT_PORT } else { 0 };
-        let cfg = cubeterra_server::Config {
+        let port = if lan { runecraft_common::DEFAULT_PORT } else { 0 };
+        let cfg = runecraft_server::Config {
             bind: if lan { format!("0.0.0.0:{port}") } else { "127.0.0.1:0".into() },
             world_dir: self.world_dir(),
             seed: self.seed_value(),
@@ -288,7 +288,7 @@ impl State {
             max_view: 16,
             mobs: true,
         };
-        match cubeterra_server::start(cfg) {
+        match runecraft_server::start(cfg) {
             Ok(server) => {
                 let addr = server.addr.to_string();
                 self.server = Some(server);
@@ -663,10 +663,10 @@ impl State {
                 self.give(d.drop, 1);
             }
             let leaves = matches!(b, block::OAK_LEAVES | block::BIRCH_LEAVES | block::CHERRY_LEAVES | block::SPRUCE_LEAVES);
-            if leaves && cubeterra_common::noise::unit(cubeterra_common::noise::hash3(self.t.to_bits(), p.x, p.y, p.z)) < 0.08 {
+            if leaves && runecraft_common::noise::unit(runecraft_common::noise::hash3(self.t.to_bits(), p.x, p.y, p.z)) < 0.08 {
                 self.give(block::APPLE, 1);
             }
-            if b == block::TALL_GRASS && cubeterra_common::noise::unit(cubeterra_common::noise::hash3(7, p.x, p.y, p.z)) < 0.5 {
+            if b == block::TALL_GRASS && runecraft_common::noise::unit(runecraft_common::noise::hash3(7, p.x, p.y, p.z)) < 0.5 {
                 self.give(block::TALL_GRASS, 1);
             }
             self.hunger = (self.hunger - 0.02).max(0.0);
@@ -866,7 +866,7 @@ impl State {
         if self.screen != Screen::Playing {
             return true;
         }
-        self.time_of_day = (self.time_of_day + dt / cubeterra_common::DAY_LENGTH).fract();
+        self.time_of_day = (self.time_of_day + dt / runecraft_common::DAY_LENGTH).fract();
         self.hurt_flash = (self.hurt_flash - dt * 2.0).max(0.0);
         self.shake = (self.shake - dt * 1.5).max(0.0);
         self.swing = (self.swing - dt * 4.0).max(0.0);
@@ -1134,7 +1134,7 @@ impl State {
 
     pub fn biome_here(&self) -> &'static str {
         let p = self.body.pos.floor().as_ivec3();
-        cubeterra_common::worldgen::sample(self.seed, p.x, p.z).biome.name()
+        runecraft_common::worldgen::sample(self.seed, p.x, p.z).biome.name()
     }
 }
 

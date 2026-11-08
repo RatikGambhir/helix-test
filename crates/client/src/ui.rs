@@ -1,9 +1,9 @@
 //! Everything drawn with Rune: the title screen, the in-game HUD and the menus.
 
 use crate::game::{Mode, Panel, Screen, State};
-use cubeterra_common::block::{self, BlockId};
-use cubeterra_common::city::CITIES;
-use cubeterra_common::craft::{RECIPES, Station};
+use runecraft_common::block::{self, BlockId};
+use runecraft_common::city::CITIES;
+use runecraft_common::craft::{RECIPES, Station};
 use glam::Vec3;
 use rune::tok::TextStyle;
 use rune::{Color, Cx, El, Key, KeyEvent, Phase, ScrollSpec, Tx, WheelEvent, col, el, row, text, text_input};
@@ -105,7 +105,7 @@ pub fn view(s: &State, cx: &mut Cx<State>) -> El {
 // Title
 
 fn title(s: &State) -> El {
-    let heading = col().gap(4.0).items_center().child(label("CUBETERRA", TextStyle::new(52.0, 800.0).tracking(4.0), white())).child(label(
+    let heading = col().gap(4.0).items_center().child(label("RUNECRAFT", TextStyle::new(52.0, 800.0).tracking(4.0), white())).child(label(
         "Build anything. Visit New York, Tokyo, Paris and London. Play with friends.",
         BODY,
         rgba(0xd6e4ff, 0.9),
@@ -126,7 +126,7 @@ fn title(s: &State) -> El {
         label("Join a friend's LAN game or a dedicated server.", SMALL, rgba(0x9aa3b0, 1.0)),
         row().gap(10.0).center_y().child(label("Address", SMALL, rgba(0xb8c0cc, 1.0)).w(84.0)).child(field(&s.addr, "addr", "host or host:port", 230.0, |s| &mut s.addr)),
         row().gap(10.0).child(button("join", "Join Server", true, |s| s.join())),
-        label("Run your own: cargo run --release -p cubeterra-server", SMALL, rgba(0x9aa3b0, 1.0)),
+        label("Run your own: cargo run --release -p runecraft-server", SMALL, rgba(0x9aa3b0, 1.0)),
     ])
     .w(374.0);
     let mut page = col().key("title")
@@ -452,7 +452,7 @@ fn hotbar(s: &State) -> El {
 fn debug(s: &State) -> El {
     let p = s.body.pos;
     let lines = [
-        format!("Cubeterra on Rune · {:.0} fps", s.fps),
+        format!("RuneCraft on Rune · {:.0} fps", s.fps),
         format!("XYZ {:.1} / {:.1} / {:.1}", p.x, p.y, p.z),
         format!("Facing {:.0}°  pitch {:.0}°", s.yaw.to_degrees(), s.pitch.to_degrees()),
         format!("Biome {}", s.biome_here()),
@@ -511,11 +511,11 @@ fn settings(s: &State) -> El {
             "view",
             |s| {
                 s.view_distance = (s.view_distance - 1).max(3);
-                s.send(cubeterra_common::protocol::ToServer::ViewDistance(s.view_distance));
+                s.send(runecraft_common::protocol::ToServer::ViewDistance(s.view_distance));
             },
             |s| {
                 s.view_distance = (s.view_distance + 1).min(16);
-                s.send(cubeterra_common::protocol::ToServer::ViewDistance(s.view_distance));
+                s.send(runecraft_common::protocol::ToServer::ViewDistance(s.view_distance));
             },
         ),
         stepper("Field of view", format!("{:.0}°", s.fov), "fov", |s| s.fov = (s.fov - 5.0).max(50.0), |s| s.fov = (s.fov + 5.0).min(110.0)),

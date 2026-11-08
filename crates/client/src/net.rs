@@ -1,8 +1,8 @@
 //! The client side of the connection: a reader thread, a writer thread and two channels.
 
-use cubeterra_common::PROTOCOL_VERSION;
-use cubeterra_common::net::{read_frame, write_frame};
-use cubeterra_common::protocol::{ToClient, ToServer};
+use runecraft_common::PROTOCOL_VERSION;
+use runecraft_common::net::{read_frame, write_frame};
+use runecraft_common::protocol::{ToClient, ToServer};
 use std::io::{BufReader, BufWriter, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -35,7 +35,7 @@ pub fn connect(addr: String, name: String, view: u8, skin: u8, wake: Option<rune
                 w();
             }
         };
-        let addr = if addr.contains(':') { addr } else { format!("{addr}:{}", cubeterra_common::DEFAULT_PORT) };
+        let addr = if addr.contains(':') { addr } else { format!("{addr}:{}", runecraft_common::DEFAULT_PORT) };
         let stream = addr
             .to_socket_addrs()
             .map_err(|e| e.to_string())

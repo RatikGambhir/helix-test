@@ -1,4 +1,4 @@
-//! Shared game logic for Cubeterra: blocks, world generation, cities, physics, crafting and the
+//! Shared game logic for RuneCraft: blocks, world generation, cities, physics, crafting and the
 //! network protocol. Both the server and the client build on this crate.
 
 pub mod block;
@@ -11,7 +11,7 @@ pub mod noise;
 pub mod physics;
 pub mod protocol;
 
-pub const GAME_NAME: &str = "Cubeterra";
+pub const GAME_NAME: &str = "RuneCraft";
 pub const DEFAULT_PORT: u16 = 25575;
 pub const PROTOCOL_VERSION: u32 = 1;
 /// Real seconds for a full day.
