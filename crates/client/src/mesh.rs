@@ -2,7 +2,7 @@
 //! light, smooth per-vertex lighting and ambient occlusion.
 
 use bytemuck::{Pod, Zeroable};
-use runecraft_common::block::{self, AIR, BlockId, Kind, WATER};
+use runecraft_common::block::{self, AIR, BlockId, Kind};
 use runecraft_common::chunk::{CHUNK, Column, HEIGHT};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -232,8 +232,40 @@ fn visible(cur: BlockId, nb: BlockId) -> bool {
     match c {
         Kind::Solid => n != Kind::Solid,
         Kind::Cutout => n != Kind::Solid && !(cur == nb && cur == block::GLASS),
-        Kind::Liquid => matches!(n, Kind::Air | Kind::Cutout | Kind::Plant) && nb != cur,
+        Kind::Liquid => {
+            let same = block::fluid(nb).zip(block::fluid(cur)).is_some_and(|(a, b)| a.0 == b.0);
+            matches!(n, Kind::Air | Kind::Cutout | Kind::Plant | Kind::Shape) && !same
+        }
         _ => false,
+    }
+}
+
+/// A block drawn from boxes, lit by its own cell.
+fn shape(out: &mut Vec<Vertex>, b: BlockId, origin: [f32; 3], light: [u8; 2]) {
+    let def = block::def(b);
+    let faces = faces();
+    for bx in block::shape_boxes(b) {
+        let (min, max) = ([bx[0], bx[1], bx[2]], [bx[3], bx[4], bx[5]]);
+        for d in 0..6 {
+            let tile = match d {
+                2 => def.tex[0],
+                3 => def.tex[2],
+                5 if b == block::CHEST => block::tile::CHEST_FRONT,
+                _ => def.tex[1],
+            };
+            let mut quad = [Vertex { pos: [0.0; 3], uv: [0.0; 2], light: [0; 4] }; 4];
+            for (k, c) in faces[d].iter().enumerate() {
+                let p = [0, 1, 2].map(|a| if c[a] == 1 { max[a] } else { min[a] });
+                let (u, v) = match d / 2 {
+                    0 => (p[2], 1.0 - p[1]),
+                    1 => (p[0], p[2]),
+                    _ => (p[0], 1.0 - p[1]),
+                };
+                let shade = (SHADE[d] * 255.0) as u8;
+                quad[k] = Vertex { pos: [origin[0] + p[0], origin[1] + p[1], origin[2] + p[2]], uv: tile_uv(tile, u, v), light: [light[0], light[1], shade, 0] };
+            }
+            out.extend_from_slice(&quad);
+        }
     }
 }
 
@@ -280,8 +312,23 @@ fn build(job: &Job) -> Output {
                     }
                     continue;
                 }
-                let water = def.kind == Kind::Liquid && b == WATER;
-                let water_top = def.kind == Kind::Liquid && !block::is_liquid(region.get(x, y + 1, z));
+                if def.kind == Kind::Shape {
+                    let l = light.get_or_insert_with(|| compute_light(&region));
+                    let i = li(x, y, z);
+                    let blk = if def.light > 0 { 255 } else { l.blk[i] * 17 };
+                    shape(&mut out.opaque, b, [x as f32 + ox, y as f32 + oy, z as f32 + oz], [l.sky[i] * 17, blk]);
+                    continue;
+                }
+                let fluid = block::fluid(b);
+                let water = fluid.is_some_and(|f| f.0 == 0);
+                // Fluid surfaces sit lower the further they've flowed.
+                let surface = match fluid {
+                    Some((kind, level)) => {
+                        let above = block::fluid(region.get(x, y + 1, z)).is_some_and(|f| f.0 == kind);
+                        if above { 1.0 } else if kind == 0 { level as f32 / 9.0 } else { level as f32 / 4.5 }
+                    }
+                    None => 1.0,
+                };
                 for d in 0..6 {
                     let n = DIRS[d];
                     let nb = region.get(x + n[0], y + n[1], z + n[2]);
@@ -337,8 +384,8 @@ fn build(job: &Job) -> Output {
                         let ao_k = [0.48, 0.64, 0.82, 1.0][ao as usize];
                         let shade = (SHADE[d] * if def.kind == Kind::Liquid { 1.0 } else { ao_k } * 255.0) as u8;
                         let mut pos = [(x + c[0]) as f32 + ox, (y + c[1]) as f32 + oy, (z + c[2]) as f32 + oz];
-                        if water_top && c[1] == 1 {
-                            pos[1] -= 0.12;
+                        if c[1] == 1 && surface < 1.0 {
+                            pos[1] -= 1.0 - surface;
                         }
                         let (u, v) = match d / 2 {
                             0 => (c[2] as f32, 1.0 - c[1] as f32),

@@ -1,8 +1,11 @@
-//! RuneCraft: a multiplayer block-building game with real cities, built on the Rune UI
+//! RuneCraft: a multiplayer block-building sandbox with real cities, built on the Rune UI
 //! framework. Rune draws the menus and HUD; the 3D world is drawn by our own wgpu renderer
 //! plugged in as Rune's compositor.
 
+mod audio;
+mod capture;
 mod game;
+mod map;
 mod mesh;
 mod net;
 mod render;
@@ -11,6 +14,7 @@ mod ui;
 mod world;
 
 use game::State;
+use runecraft_common::block;
 use rune::{App, AppSpec, Tx, Waker};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -41,6 +45,8 @@ pub fn local_ip() -> String {
 /// player is loaded and meshed, so `--snap` shows the game.
 fn play_and_wait(s: &mut State, travel: Option<(f32, f32, f32)>, yaw: f32, pitch: f32, time: f32) {
     s.view_distance = 8;
+    s.sound_on = false;
+    s.capture_enabled = false;
     s.world_name = rune::TextEdit::new("snapshot-world");
     s.seed_text = rune::TextEdit::new("2026");
     s.host(false);
@@ -69,6 +75,8 @@ fn play_and_wait(s: &mut State, travel: Option<(f32, f32, f32)>, yaw: f32, pitch
     }
     s.hint_until = 0.0;
     s.chat.clear();
+    s.view_proj = s.camera();
+    map::draw(s, 128, 1, true);
 }
 
 /// A scripted friend who connects to the hosted world and stands in front of you.
@@ -124,24 +132,47 @@ fn main() {
             ("tokyo", |s| play_and_wait(s, Some(city(1)), 3.6, 0.3, 0.35)),
             ("paris", |s| play_and_wait(s, Some(city(2)), 3.14, 0.35, 0.3)),
             ("london", |s| play_and_wait(s, Some(city(3)), 3.0, 0.2, 0.3)),
+            ("chicago", |s| play_and_wait(s, Some(city(4)), 0.3, 0.3, 0.3)),
+            ("sydney", |s| play_and_wait(s, Some(city(5)), 0.0, 0.1, 0.3)),
+            ("dubai", |s| play_and_wait(s, Some(city(6)), 0.0, 0.35, 0.3)),
+            ("rome", |s| play_and_wait(s, Some(city(7)), 0.0, 0.15, 0.3)),
             ("night", |s| play_and_wait(s, Some(city(1)), 3.6, 0.3, 0.9)),
             ("friends", friend_scene),
             ("inventory", |s| {
                 play_and_wait(s, None, 0.6, -0.15, 0.3);
-                s.panel = game::Panel::Inventory;
-            }),
-            ("survival", |s| {
-                play_and_wait(s, None, 0.6, -0.15, 0.3);
                 s.mode = game::Mode::Survival;
                 s.inv = [None; game::INV];
-                s.give(runecraft_common::block::OAK_LOG, 6);
-                s.give(runecraft_common::block::COBBLE, 12);
+                for (id, n) in [(block::OAK_LOG, 6), (block::COBBLE, 24), (block::STICK, 8), (block::COAL, 5), (block::IRON_INGOT, 3), (block::RAW_BEEF, 2), (block::IRON_PICK, 1)] {
+                    s.give(block::Stack::new(id, n));
+                }
+                s.inv[8] = Some(block::Stack { id: block::IRON_PICK, n: 1, dmg: 120 });
+                s.armor[1] = Some(block::Stack::new(block::IRON_CHESTPLATE, 1));
+                s.grid[0] = Some(block::Stack::new(block::PLANKS, 2));
+                s.grid[3] = Some(block::Stack::new(block::PLANKS, 2));
+                s.cursor = Some(block::Stack::new(block::TORCH, 4));
+                s.pointer = Some((700.0, 260.0));
                 s.health = 15.0;
                 s.panel = game::Panel::Inventory;
             }),
-            ("travel", |s| {
+            ("creative", |s| {
                 play_and_wait(s, None, 0.6, -0.15, 0.3);
-                s.panel = game::Panel::Travel;
+                s.mode = game::Mode::Creative;
+                s.panel = game::Panel::Inventory;
+            }),
+            ("map", |s| {
+                play_and_wait(s, None, 0.6, -0.15, 0.3);
+                map::draw(s, 256, 2, false);
+                s.panel = game::Panel::Map;
+            }),
+            ("rain", |s| {
+                play_and_wait(s, None, 0.6, -0.05, 0.3);
+                s.rain = 1.0;
+                s.rain_target = 1.0;
+                for _ in 0..60 {
+                    let t = s.t + 0.016;
+                    s.update(t);
+                }
+                s.hint_until = 0.0;
             }),
         ],
         ..AppSpec::new("RuneCraft", (1280.0, 800.0), State::new, ui::view)
@@ -179,6 +210,9 @@ mod tests {
         let mut b = State::new();
         for (s, n) in [(&mut a, "alice"), (&mut b, "bob")] {
             s.name = rune::TextEdit::new(n);
+            s.sound_on = false;
+            s.capture_enabled = false;
+            s.mode = game::Mode::Creative;
             s.addr = rune::TextEdit::new(server.addr.to_string());
             s.view_distance = 3;
             s.join();
@@ -211,8 +245,8 @@ mod tests {
         a.pitch = -1.55;
         a.update(t);
         let target = a.target.expect("a block under alice").pos;
-        a.drag(rune::Phase::Down, 0.0, 0.0);
-        a.drag(rune::Phase::Up, 0.0, 0.0);
+        a.drag(rune::Phase::Down, 0.0, 0.0, 0.0, 0.0);
+        a.drag(rune::Phase::Up, 0.0, 0.0, 0.0, 0.0);
         assert_eq!(a.world.get(target.x, target.y, target.z), block::AIR);
         assert!(pump(&mut [&mut a, &mut b], &mut t, |v| v[1].world.get(target.x, target.y, target.z) == block::AIR), "bob sees the hole");
 
@@ -227,6 +261,8 @@ mod tests {
 
     fn headless_game() -> rune::Runtime<State> {
         let mut s = State::new();
+        s.capture_enabled = false;
+        s.sound_on = false;
         s.screen = game::Screen::Playing;
         let mut rt = rune::Runtime::new(s, ui::view, (1280.0, 800.0), rune::Env { system_dark: true, scale: 1.0 });
         rt.on_key = Some(ui::on_key);

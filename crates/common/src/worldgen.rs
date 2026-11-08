@@ -165,6 +165,9 @@ fn ore(seed: u64, x: i32, y: i32, z: i32) -> BlockId {
         if y < 64 && cell < 0.05 {
             return IRON_ORE;
         }
+        if (40..96).contains(&y) && cell < 0.065 {
+            return COPPER_ORE;
+        }
         if y < 128 && cell < 0.09 {
             return COAL_ORE;
         }

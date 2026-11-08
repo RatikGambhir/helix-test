@@ -13,6 +13,6 @@ pub mod protocol;
 
 pub const GAME_NAME: &str = "RuneCraft";
 pub const DEFAULT_PORT: u16 = 25575;
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 /// Real seconds for a full day.
 pub const DAY_LENGTH: f32 = 1200.0;

@@ -32,9 +32,6 @@ pub struct Input {
     pub flying: bool,
 }
 
-fn solid_at(get: &dyn Fn(i32, i32, i32) -> BlockId, x: i32, y: i32, z: i32) -> bool {
-    block::is_solid(get(x, y, z))
-}
 
 impl Body {
     pub fn new(pos: Vec3) -> Body {
@@ -48,13 +45,22 @@ impl Body {
         for y in (min.y + eps).floor() as i32..=(max.y - eps).floor() as i32 {
             for z in (min.z + eps).floor() as i32..=(max.z - eps).floor() as i32 {
                 for x in (min.x + eps).floor() as i32..=(max.x - eps).floor() as i32 {
-                    if solid_at(get, x, y, z) {
-                        return true;
+                    for b in block::collision_boxes(get(x, y, z)) {
+                        let (bx, by, bz) = (x as f32, y as f32, z as f32);
+                        if min.x + eps < bx + b[3] && max.x - eps > bx + b[0] && min.y + eps < by + b[4] && max.y - eps > by + b[1] && min.z + eps < bz + b[5] && max.z - eps > bz + b[2] {
+                            return true;
+                        }
                     }
                 }
             }
         }
         false
+    }
+
+    /// Standing in a ladder's cell.
+    pub fn on_ladder(&self, get: &dyn Fn(i32, i32, i32) -> BlockId) -> bool {
+        let (x, z) = (self.pos.x.floor() as i32, self.pos.z.floor() as i32);
+        [0.1, 1.0].iter().any(|dy| block::is_ladder(get(x, (self.pos.y + dy).floor() as i32, z)))
     }
 
     /// Moves along one axis, stopping flush against the first solid block. True if blocked.
@@ -104,7 +110,17 @@ impl Body {
         self.vel.x += (input.wish.x - self.vel.x) * k;
         self.vel.z += (input.wish.z - self.vel.z) * k;
 
-        if input.flying {
+        let ladder = !input.flying && self.on_ladder(get);
+        if ladder {
+            self.fall_from = None;
+            self.vel.y = if input.jump || input.wish.length_squared() > 0.1 {
+                2.8
+            } else if input.descend {
+                0.0
+            } else {
+                (self.vel.y - GRAVITY * dt).max(-2.5)
+            };
+        } else if input.flying {
             let target = if input.jump { FLY * 0.8 } else if input.descend { -FLY * 0.8 } else { 0.0 };
             self.vel.y += (target - self.vel.y) * (10.0 * dt).min(1.0);
             self.fall_from = None;
@@ -126,6 +142,7 @@ impl Body {
 
         let was_ground = self.on_ground;
         let blocked_y = self.sweep(1, self.vel.y * dt, get);
+        let _ = ladder;
         let falling = self.vel.y < 0.0;
         if blocked_y {
             self.vel.y = 0.0;
@@ -175,6 +192,15 @@ pub struct Hit {
 
 /// Walks the grid from `origin` along `dir` and returns the first targetable block.
 pub fn raycast(origin: Vec3, dir: Vec3, max: f32, get: &dyn Fn(i32, i32, i32) -> BlockId) -> Option<Hit> {
+    raycast_with(origin, dir, max, get, false)
+}
+
+/// Like `raycast`, but fluid sources count as targets too (for buckets).
+pub fn raycast_fluids(origin: Vec3, dir: Vec3, max: f32, get: &dyn Fn(i32, i32, i32) -> BlockId) -> Option<Hit> {
+    raycast_with(origin, dir, max, get, true)
+}
+
+fn raycast_with(origin: Vec3, dir: Vec3, max: f32, get: &dyn Fn(i32, i32, i32) -> BlockId, fluids: bool) -> Option<Hit> {
     let dir = dir.normalize_or_zero();
     if dir == Vec3::ZERO {
         return None;
@@ -192,7 +218,7 @@ pub fn raycast(origin: Vec3, dir: Vec3, max: f32, get: &dyn Fn(i32, i32, i32) ->
     let mut t = 0.0;
     while t <= max {
         let b = get(cell.x, cell.y, cell.z);
-        if b != block::AIR && !block::is_liquid(b) {
+        if b != block::AIR && (!block::is_liquid(b) || (fluids && block::is_source(b))) {
             return Some(Hit { pos: cell, normal, block: b, dist: t });
         }
         if t_max.x < t_max.y && t_max.x < t_max.z {

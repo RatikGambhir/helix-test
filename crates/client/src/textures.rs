@@ -1,7 +1,7 @@
 //! Every texture in the game is painted here in code: a 256×256 atlas of 16×16 tiles, plus
 //! inventory icons drawn from it.
 
-use runecraft_common::block::{self, BlockId, Kind, tile as t};
+use runecraft_common::block::{self, BlockId, tile as t};
 use runecraft_common::noise::{hash3, unit};
 
 pub const TILE: usize = 16;
@@ -181,8 +181,40 @@ impl Painter {
         }
     }
     fn sprite_tool(&mut self, head: u32, sword: bool) {
+        self.sprite_kind(head, if sword { 1 } else { 0 });
+    }
+    /// 0 pick, 1 sword, 2 axe, 3 shovel, 4 hoe.
+    fn sprite_kind(&mut self, head: u32, kind: u8) {
         self.clear();
         let handle = hex(0x7a5a32);
+        if kind >= 2 {
+            self.line(3.0, 13.0, 11.0, 5.0, handle);
+            self.line(4.0, 13.0, 12.0, 5.0, mul(handle, 0.8));
+            match kind {
+                2 => {
+                    for y in 2..8 {
+                        for x in 9..14 {
+                            if x - 9 <= y {
+                                self.set(x, y, mul(hex(head), 0.85 + (y as f32) * 0.03), 1.0);
+                            }
+                        }
+                    }
+                }
+                3 => {
+                    for y in 1..6 {
+                        for x in 10..15 {
+                            self.set(x, y, mul(hex(head), 0.9 + (x as f32 - 10.0) * 0.04), 1.0);
+                        }
+                    }
+                }
+                _ => {
+                    self.line(8.0, 3.0, 13.0, 3.0, hex(head));
+                    self.line(8.0, 4.0, 12.0, 4.0, mul(hex(head), 0.8));
+                }
+            }
+            return;
+        }
+        let sword = kind == 1;
         if sword {
             self.line(3.0, 12.0, 5.0, 10.0, handle);
             self.line(2.0, 9.0, 6.0, 13.0, mul(hex(head), 0.7));
@@ -703,6 +735,377 @@ fn paint(id: u8) -> Painter {
             p.set(5, 7, hex(0x111111), 1.0);
             p.set(10, 7, hex(0x111111), 1.0);
         }
+
+        t::TORCH => {
+            p.clear();
+            for y in 6..16 {
+                for x in 7..9 {
+                    p.set(x, y, mul(hex(0x7a5a32), 0.9 + (x - 7) as f32 * 0.15), 1.0);
+                }
+            }
+            for (x, y, c) in [(7, 5, 0xffd94a), (8, 5, 0xffd94a), (7, 6, 0xff9a2a), (8, 6, 0xffb43a), (7, 4, 0xfff3a0), (8, 4, 0xffe070)] {
+                p.set(x, y, hex(c), 1.0);
+            }
+        }
+        t::DOOR_TOP | t::DOOR_BOTTOM => {
+            p.px = paint(t::PLANKS).px;
+            p.frame(0x6b4f2d, 0);
+            if id == t::DOOR_TOP {
+                for y in 3..9 {
+                    for x in [3, 4, 5, 10, 11, 12] {
+                        p.set(x, y, hex(0xbfe3f5), 1.0);
+                    }
+                }
+            } else {
+                p.frame(0x8a6a42, 3);
+                p.set(12, 2, hex(0x333333), 1.0);
+                p.set(12, 3, hex(0x333333), 1.0);
+            }
+        }
+        t::LADDER => {
+            p.clear();
+            for y in 0..16 {
+                for x in [2, 3, 12, 13] {
+                    p.set(x, y, mul(hex(0x8a6a3a), 0.9 + (y % 3) as f32 * 0.05), 1.0);
+                }
+            }
+            for y in [2, 6, 10, 14] {
+                for x in 2..14 {
+                    p.set(x, y, hex(0x9c7a46), 1.0);
+                }
+            }
+        }
+        t::BED_TOP => {
+            p.noise(0xb02e26, 0.08);
+            for y in 0..5 {
+                for x in 1..15 {
+                    p.set(x, y, mul(hex(0xeeeeee), 0.95 + p.r(x, y, 2) * 0.05), 1.0);
+                }
+            }
+        }
+        t::BED_SIDE => {
+            p.px = paint(t::PLANKS).px;
+            for y in 0..6 {
+                for x in 0..16 {
+                    p.set(x, y, mul(hex(0xb02e26), 0.9 + p.r(x, y, 3) * 0.1), 1.0);
+                }
+            }
+        }
+        t::CHEST_TOP | t::CHEST_FRONT | t::CHEST_SIDE => {
+            p.px = paint(t::PLANKS).px;
+            p.frame(0x5a3d1e, 0);
+            if id != t::CHEST_TOP {
+                for x in 0..16 {
+                    p.set(x, 5, hex(0x3d2a15), 1.0);
+                }
+            }
+            if id == t::CHEST_FRONT {
+                for (x, y) in [(7, 5), (8, 5), (7, 6), (8, 6), (7, 7), (8, 7)] {
+                    p.set(x, y, hex(0xc9c9c9), 1.0);
+                }
+            }
+        }
+        t::FARMLAND => {
+            p.noise(0x5a3c22, 0.2);
+            for y in [3, 7, 11, 15] {
+                for x in 0..16 {
+                    p.set(x, y, hex(0x3d2814), 1.0);
+                }
+            }
+        }
+        _ if (t::WHEAT..t::WHEAT + 4).contains(&id) => {
+            p.clear();
+            let stage = (id - t::WHEAT) as f32;
+            let top = 13.0 - stage * 3.3;
+            let c = mix(hex(0x5f9e35), hex(0xd8b84a), stage / 3.0);
+            for i in 0..5 {
+                let x = 2.0 + i as f32 * 3.0;
+                p.line(x, 15.0, x + (p.r(i, 0, 2) - 0.5) * 2.0, top, mul(c, 0.85 + p.r(i, 1, 2) * 0.3));
+                if stage >= 3.0 {
+                    p.line(x, top, x, top + 3.0, hex(0xe8c860));
+                }
+            }
+        }
+        t::SAPLING => {
+            p.clear();
+            p.line(8.0, 15.0, 8.0, 8.0, hex(0x6b5132));
+            for y in 3..10 {
+                for x in 4..13 {
+                    if (x - 8) * (x - 8) + (y - 6) * (y - 6) < 12 && p.r(x, y, 4) < 0.85 {
+                        p.set(x, y, mul(hex(0x3e8a2b), 0.8 + p.r(x, y, 5) * 0.4), 1.0);
+                    }
+                }
+            }
+        }
+        t::COPPER_ORE => {
+            p.noise(0x7d7d7d, 0.22);
+            p.blobs(0xc9743d, 4, 11);
+            p.blobs(0x5fa68f, 2, 13);
+        }
+        t::FURNACE_LIT => {
+            p.px = paint(t::COBBLE).px;
+            for y in 7..14 {
+                for x in 4..12 {
+                    let c = if y < 9 { 0xffd23a } else { 0xff7a1a };
+                    p.set(x, y, mul(hex(c), 0.9 + p.r(x, y, 2) * 0.2), 1.0);
+                }
+            }
+        }
+        t::RAIL => {
+            p.clear();
+            for y in [1, 5, 9, 13] {
+                for x in 1..15 {
+                    p.set(x, y, hex(0x7a5a32), 1.0);
+                    p.set(x, y + 1, hex(0x6b4f2d), 1.0);
+                }
+            }
+            for y in 0..16 {
+                for x in [3, 12] {
+                    p.set(x, y, hex(0xb8b8b8), 1.0);
+                }
+            }
+        }
+        t::SEEDS => {
+            p.clear();
+            for i in 0..7 {
+                let (x, y) = (4 + (p.r(i, 0, 3) * 8.0) as i32, 5 + (p.r(i, 1, 3) * 7.0) as i32);
+                p.set(x, y, hex(0x6f8f2a), 1.0);
+                p.set(x + 1, y, hex(0x55701e), 1.0);
+            }
+        }
+        t::WHEAT_ITEM => {
+            p.clear();
+            for i in 0..4 {
+                p.line(5.0 + i as f32, 14.0, 9.0 + i as f32 * 1.5, 2.0, hex(0xd8b84a));
+            }
+            p.line(5.0, 10.0, 12.0, 10.0, hex(0x8a6a2a));
+        }
+        _ if (t::MEAT..t::MEAT + 8).contains(&id) => {
+            p.clear();
+            let k = (id - t::MEAT) as usize;
+            let raw = [0xe58080, 0xa0522d, 0xc2453a, 0x7a3a1f, 0xf0c0a0, 0xc88a4a, 0xd06060, 0x8a4a2a][k];
+            for y in 4..13 {
+                for x in 3..13 {
+                    if (x - 8) * (x - 8) * 2 + (y - 8) * (y - 8) * 3 < 50 {
+                        p.set(x, y, mul(hex(raw), 0.85 + p.r(x, y, 2) * 0.25), 1.0);
+                    }
+                }
+            }
+            p.line(11.0, 9.0, 14.0, 12.0, hex(0xeeeeee));
+        }
+        t::ROTTEN => {
+            p.clear();
+            for y in 4..13 {
+                for x in 3..13 {
+                    if (x - 8) * (x - 8) + (y - 8) * (y - 8) < 18 {
+                        p.set(x, y, mul(hex(0x7a7a3a), 0.7 + p.r(x, y, 2) * 0.5), 1.0);
+                    }
+                }
+            }
+        }
+        t::BONE => {
+            p.clear();
+            p.line(4.0, 12.0, 12.0, 4.0, hex(0xeeeeea));
+            p.line(5.0, 12.0, 12.0, 5.0, hex(0xd8d8d0));
+            for (x, y) in [(3, 12), (4, 13), (12, 3), (13, 4)] {
+                p.set(x, y, hex(0xf6f6f2), 1.0);
+            }
+        }
+        t::STRING => {
+            p.clear();
+            let mut x = 3.0f32;
+            for y in 2..14 {
+                x += ((y as f32) * 0.9).sin() * 0.8;
+                p.set(x as i32 + 4, y, hex(0xf2f2f2), 1.0);
+            }
+        }
+        t::FEATHER => {
+            p.clear();
+            p.line(4.0, 13.0, 12.0, 3.0, hex(0x9a9a9a));
+            for i in 0..8 {
+                let (x, y) = (5.0 + i as f32, 11.0 - i as f32 * 1.1);
+                p.line(x, y, x + 2.0, y - 2.5, hex(0xf5f5f5));
+            }
+        }
+        t::LEATHER => {
+            p.clear();
+            for y in 3..13 {
+                for x in 3..13 {
+                    if !((x == 3 || x == 12) && (y == 3 || y == 12)) {
+                        p.set(x, y, mul(hex(0x8a5a32), 0.85 + p.r(x, y, 2) * 0.2), 1.0);
+                    }
+                }
+            }
+        }
+        t::ARROW => {
+            p.clear();
+            p.line(3.0, 13.0, 12.0, 4.0, hex(0x8a6a3a));
+            for (x, y) in [(12, 3), (13, 3), (13, 4), (11, 3), (13, 5)] {
+                p.set(x, y, hex(0x9a9a9a), 1.0);
+            }
+            for (x, y) in [(2, 12), (3, 14), (2, 13), (4, 14)] {
+                p.set(x, y, hex(0xf2f2f2), 1.0);
+            }
+        }
+        t::BOW => {
+            p.clear();
+            for i in 0..14 {
+                let a = i as f32 / 13.0 * std::f32::consts::PI;
+                let (x, y) = (4.0 + a.sin() * 7.0, 1.0 + i as f32);
+                p.set(x as i32, y as i32, hex(0x7a5a32), 1.0);
+                p.set(x as i32 + 1, y as i32, hex(0x5e4426), 1.0);
+            }
+            p.line(4.0, 1.0, 4.0, 14.0, hex(0xe8e8e8));
+        }
+        t::COPPER_INGOT => {
+            p.clear();
+            for y in 6..11 {
+                for x in (2 + (10 - y).max(0) / 2)..(14 - (10 - y).max(0) / 2) {
+                    p.set(x, y, mul(hex(0xd47a42), if y == 6 { 1.15 } else { 0.95 }), 1.0);
+                }
+            }
+        }
+        _ if (t::AXE..t::AXE + 4).contains(&id) => p.sprite_kind([0xa07a45, 0x8a8a8a, 0xe5e5e5, 0x62e9e2][(id - t::AXE) as usize], 2),
+        _ if (t::SHOVEL..t::SHOVEL + 4).contains(&id) => p.sprite_kind([0xa07a45, 0x8a8a8a, 0xe5e5e5, 0x62e9e2][(id - t::SHOVEL) as usize], 3),
+        _ if (t::HOE..t::HOE + 4).contains(&id) => p.sprite_kind([0xa07a45, 0x8a8a8a, 0xe5e5e5, 0x62e9e2][(id - t::HOE) as usize], 4),
+        _ if (t::ARMOR..t::ARMOR + 8).contains(&id) => {
+            p.clear();
+            let k = (id - t::ARMOR) as i32;
+            let c = hex(if k % 2 == 0 { 0xdcdcdc } else { 0x62e9e2 });
+            let piece = k / 2;
+            for y in 0..16 {
+                for x in 0..16 {
+                    let on = match piece {
+                        0 => (3..13).contains(&x) && (3..10).contains(&y) && !((5..11).contains(&x) && y >= 7),
+                        1 => (2..14).contains(&x) && (2..14).contains(&y) && !((6..10).contains(&x) && y < 4) && !((x < 4 || x > 11) && y > 7),
+                        2 => (3..13).contains(&x) && (2..14).contains(&y) && !((7..9).contains(&x) && y > 5),
+                        _ => ((2..7).contains(&x) || (9..14).contains(&x)) && (8..14).contains(&y),
+                    };
+                    if on {
+                        p.set(x, y, mul(c, 0.8 + (16 - y) as f32 * 0.015), 1.0);
+                    }
+                }
+            }
+        }
+        t::BUCKET | t::WATER_BUCKET | t::LAVA_BUCKET => {
+            p.clear();
+            for y in 4..14 {
+                let w = 6 - (y - 4) / 4;
+                for x in (8 - w)..(8 + w) {
+                    p.set(x, y, mul(hex(0xbcbcbc), 0.85 + (x as f32 - 4.0) * 0.02), 1.0);
+                }
+            }
+            if id != t::BUCKET {
+                let c = if id == t::WATER_BUCKET { 0x3466d4 } else { 0xff7a1a };
+                for x in 3..13 {
+                    p.set(x, 4, hex(c), 1.0);
+                    p.set(x, 5, mul(hex(c), 0.85), 1.0);
+                }
+            }
+            p.line(3.0, 4.0, 8.0, 1.0, hex(0x9a9a9a));
+            p.line(8.0, 1.0, 13.0, 4.0, hex(0x9a9a9a));
+        }
+        t::BONE_MEAL => {
+            p.clear();
+            for i in 0..14 {
+                let (x, y) = (4 + (p.r(i, 0, 5) * 8.0) as i32, 5 + (p.r(i, 1, 5) * 7.0) as i32);
+                p.set(x, y, hex(0xf2f2ee), 1.0);
+            }
+        }
+        t::FLINT => {
+            p.clear();
+            for y in 4..13 {
+                for x in 4..12 {
+                    if x + y > 9 && x - y < 5 && y - x < 6 {
+                        p.set(x, y, mul(hex(0x3a3a3e), 0.8 + p.r(x, y, 2) * 0.5), 1.0);
+                    }
+                }
+            }
+        }
+        t::COW => {
+            p.noise(0xeeeeea, 0.05);
+            p.blobs(0x2a2622, 4, 9);
+            p.blobs(0x2a2622, 3, 12);
+        }
+        t::COW_FACE => {
+            p.noise(0xeeeeea, 0.05);
+            p.blobs(0x2a2622, 1, 9);
+            for (x, y) in [(4, 6), (11, 6)] {
+                p.set(x, y, hex(0x111111), 1.0);
+            }
+            for y in 10..14 {
+                for x in 4..12 {
+                    p.set(x, y, hex(0xe6a8a8), 1.0);
+                }
+            }
+            p.set(6, 12, hex(0x6a3a3a), 1.0);
+            p.set(9, 12, hex(0x6a3a3a), 1.0);
+        }
+        t::CHICKEN => p.noise(0xf6f6f2, 0.05),
+        t::CHICKEN_FACE => {
+            p.noise(0xf6f6f2, 0.05);
+            for (x, y) in [(4, 5), (11, 5)] {
+                p.set(x, y, hex(0x111111), 1.0);
+            }
+            for y in 7..10 {
+                for x in 6..10 {
+                    p.set(x, y, hex(0xf2b83a), 1.0);
+                }
+            }
+            for y in 10..13 {
+                for x in 7..9 {
+                    p.set(x, y, hex(0xd8282a), 1.0);
+                }
+            }
+        }
+        t::SKELETON => {
+            p.noise(0xc8c8c0, 0.08);
+            for y in (1..16).step_by(3) {
+                for x in 0..16 {
+                    p.set(x, y, hex(0x8a8a84), 1.0);
+                }
+            }
+        }
+        t::SKELETON_FACE => {
+            p.noise(0xd0d0c8, 0.06);
+            for (x0, y0) in [(3, 5), (10, 5)] {
+                for y in y0..y0 + 3 {
+                    for x in x0..x0 + 3 {
+                        p.set(x, y, hex(0x1a1a1a), 1.0);
+                    }
+                }
+            }
+            for x in 4..12 {
+                p.set(x, 11, hex(0x3a3a3a), 1.0);
+            }
+            for x in (4..12).step_by(2) {
+                p.set(x, 12, hex(0x3a3a3a), 1.0);
+            }
+        }
+        t::SPIDER => {
+            p.noise(0x2e2a28, 0.25);
+            p.specks(0x4a3e36, 0.15, 3);
+        }
+        t::SPIDER_FACE => {
+            p.noise(0x2e2a28, 0.2);
+            for (x, y) in [(4, 6), (5, 6), (10, 6), (11, 6), (6, 8), (9, 8), (3, 4), (12, 4)] {
+                p.set(x, y, hex(0xff2a2a), 1.0);
+            }
+        }
+        t::RAIN => {
+            p.clear();
+            for y in 0..16 {
+                for x in 7..9 {
+                    p.set(x, y, hex(0x8fb4e8), 0.7);
+                }
+            }
+        }
+        t::SNOWFLAKE => p.noise(0xffffff, 0.02),
+        t::SMOKE => p.noise(0x8a8a8a, 0.2),
+        t::FLAME => {
+            p.noise(0xffb43a, 0.2);
+            p.specks(0xfff3a0, 0.2, 4);
+        }
         _ => {
             // Missing tile: magenta checker, easy to spot.
             for y in 0..16 {
@@ -745,7 +1148,7 @@ impl Atlas {
     pub fn icon(&self, id: BlockId) -> Vec<u8> {
         const S: usize = 32;
         let mut out = vec![0u8; S * S * 4];
-        let flat = !block::is_block(id) || matches!(block::def(id).kind, Kind::Plant);
+        let flat = block::is_flat(id);
         if flat {
             let tile = block::item_tile(id);
             for y in 0..S {
