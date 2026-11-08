@@ -35,8 +35,14 @@ fn colors(s: &State) -> &'static [[u8; 3]; 256] {
 fn top(s: &State, x: i32, z: i32) -> Option<(BlockId, i32)> {
     let ((cx, lx), (cz, lz)) = (chunk::split(x), chunk::split(z));
     let col = s.world.columns.get(&(cx, cz))?;
-    let start = (col.height(lx, lz) + 48).min(HEIGHT - 1);
-    let mut y = start;
+    let mut y = (col.height(lx, lz) + 48).min(HEIGHT - 1);
+    if s.dim == 1 {
+        // Under the Ember realm's roof: look down from the player's height.
+        y = (s.body.pos.y as i32 + 4).clamp(1, HEIGHT - 1);
+        while y > 0 && block::is_solid(col.get(lx, y, lz)) {
+            y -= 1;
+        }
+    }
     while y > 0 {
         let b = col.get(lx, y, lz);
         if b != block::AIR && b != block::TALL_GRASS {

@@ -1,6 +1,7 @@
 //! Messages between client and server. Each travels as a length-prefixed bincode frame.
 
 use crate::block::Stack;
+pub use crate::vehicle::{VehicleKind, VehicleState};
 use serde::{Deserialize, Serialize};
 
 pub type PlayerId = u32;
@@ -56,11 +57,30 @@ pub enum ToServer {
     Sleep(Option<[i32; 3]>),
     Held(u8),
     Save(PlayerSave),
+    /// Strike flint and steel in an empty cell: lights a portal frame around it.
+    Light { pos: [i32; 3] },
+    PlaceVehicle { kind: VehicleKind, pos: [f32; 3], yaw: f32 },
+    /// Get into a vehicle's seat (0 drives).
+    Mount { id: u32, seat: u8 },
+    Dismount,
+    /// The driver reports where the vehicle (and the cars it pulls) went.
+    VehicleMove { id: u32, pos: [f32; 3], yaw: f32, speed: f32, cars: Vec<[f32; 4]> },
+    /// Break a vehicle back into its item.
+    BreakVehicle { id: u32 },
+    /// Download a real place from OpenStreetMap and build it in the world.
+    LoadPlace(String),
+}
+
+/// A real place built from map data, for the travel list.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlaceSummary {
+    pub name: String,
+    pub pos: [f32; 3],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ToClient {
-    Welcome { id: PlayerId, seed: u64, spawn: [f32; 3], time: f32, world: String, motd: String, save: Option<PlayerSave> },
+    Welcome { id: PlayerId, seed: u64, dim: u8, spawn: [f32; 3], time: f32, world: String, motd: String, save: Option<PlayerSave> },
     Column { cx: i32, cz: i32, data: Vec<u8> },
     Unload { cx: i32, cz: i32 },
     BlockChanged { pos: [i32; 3], block: u8 },
@@ -85,4 +105,8 @@ pub enum ToClient {
     /// Morning came: everyone in bed gets up.
     WakeUp,
     Kicked(String),
+    /// You went through a portal: forget the old world, these chunks belong to dimension `dim`.
+    Dimension { dim: u8, pos: [f32; 3] },
+    Vehicles(Vec<VehicleState>),
+    Places(Vec<PlaceSummary>),
 }

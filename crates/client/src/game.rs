@@ -14,6 +14,7 @@ use runecraft_common::craft::{self, Recipe};
 use runecraft_common::noise::{hash3, unit};
 use runecraft_common::physics::{self, Body, Hit, raycast, raycast_fluids};
 use runecraft_common::protocol::*;
+use runecraft_common::vehicle::{self, Controls, Drive};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,6 +41,8 @@ pub enum Panel {
     Dead,
     Help,
     Sleeping,
+    /// A trading post's offers.
+    Trade,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -90,6 +93,13 @@ pub struct ItemView {
     pub item: u8,
     pub target: Vec3,
     pub pos: Vec3,
+}
+
+/// A vehicle as last reported, eased toward where it's going.
+pub struct VehicleView {
+    pub state: VehicleState,
+    pub pos: Vec3,
+    pub yaw: f32,
 }
 
 pub struct Particle {
@@ -214,6 +224,20 @@ pub struct State {
     pub hint_until: f64,
     pub wheel_acc: f32,
     pub selected_at: f64,
+
+    /// 0 the overworld, 1 the Ember realm, 2 the Sky realm.
+    pub dim: u8,
+    pub weather_rain: f32,
+    pub vehicles: HashMap<u32, VehicleView>,
+    /// The vehicle and seat you're in.
+    pub riding: Option<(u32, u8)>,
+    /// Your vehicle's physics, when you drive.
+    pub drive: Option<Drive>,
+    pub vehicle_sent: f64,
+    /// The vehicle under the crosshair, and how far.
+    pub vehicle_target: Option<(u32, f32)>,
+    pub places: Vec<PlaceSummary>,
+    pub place_edit: TextEdit,
 }
 
 fn data_dir() -> PathBuf {
@@ -370,6 +394,15 @@ impl State {
             hint_until: 0.0,
             wheel_acc: 0.0,
             selected_at: -10.0,
+            dim: 0,
+            weather_rain: 0.0,
+            vehicles: HashMap::new(),
+            riding: None,
+            drive: None,
+            vehicle_sent: 0.0,
+            vehicle_target: None,
+            places: Vec::new(),
+            place_edit: TextEdit::new(""),
         }
     }
 
@@ -391,6 +424,10 @@ impl State {
         self.world.clear();
         self.others.clear();
         self.items.clear();
+        self.vehicles.clear();
+        self.riding = None;
+        self.drive = None;
+        self.dim = 0;
         self.got_welcome = false;
         self.status = format!("Connecting to {addr}…");
         self.conn = Some(net::connect(addr, self.name.text.trim().to_string(), self.view_distance, self.skin, self.waker.clone()));
@@ -987,6 +1024,9 @@ impl State {
     }
 
     pub fn daylight(&self) -> f32 {
+        if self.dim == 1 {
+            return 0.2;
+        }
         let sun = (self.time_of_day * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2).sin();
         (sun * 2.5 + 0.55).clamp(0.12, 1.0) * (1.0 - self.rain * 0.35)
     }
@@ -1115,6 +1155,14 @@ impl State {
             return;
         }
         self.swing = 1.0;
+        if let Some((id, d)) = self.vehicle_target
+            && self.target.is_none_or(|h| h.dist > d)
+        {
+            self.send(ToServer::BreakVehicle { id });
+            self.sound(Sound::Break(1), None);
+            self.break_cooldown = 0.3;
+            return;
+        }
         if self.mode == Mode::Creative {
             self.break_target();
             self.break_cooldown = 0.3;
@@ -1189,6 +1237,13 @@ impl State {
         self.use_cooldown = 0.18;
         self.swing = 1.0;
         let held = self.held_item();
+        if let Some((id, d)) = self.vehicle_target
+            && self.target.is_none_or(|h| h.dist > d)
+            && self.riding.is_none()
+        {
+            self.send(ToServer::Mount { id, seat: 0 });
+            return;
+        }
         if let Some(hit) = self.target
             && !self.shift
             && self.use_block(hit)
@@ -1196,6 +1251,9 @@ impl State {
             return;
         }
         let Some(s) = held else { return };
+        if let Some(kind) = VehicleKind::from_item(s.id) {
+            return self.place_vehicle(kind);
+        }
         if let Some(food) = block::food_value(s.id) {
             if self.hunger < 20.0 || self.mode == Mode::Creative {
                 self.hunger = (self.hunger + food).min(20.0);
@@ -1221,6 +1279,15 @@ impl State {
                 self.set_block(hit.pos, block::FARMLAND);
                 self.sound(Sound::Place(2), Some(hit.pos.as_vec3()));
                 self.wear_held();
+                return;
+            }
+            (block::FLINT_STEEL, b) => {
+                if b == block::TNT {
+                    self.send(ToServer::Ignite { pos: hit.pos.to_array() });
+                } else {
+                    self.send(ToServer::Light { pos: (hit.pos + hit.normal).to_array() });
+                }
+                self.sound(Sound::Click, Some(hit.pos.as_vec3()));
                 return;
             }
             (block::SEEDS, block::FARMLAND) if hit.normal.y == 1 => {
@@ -1254,6 +1321,20 @@ impl State {
             }
             block::CRAFTING_TABLE => {
                 self.open(Panel::Crafting);
+                true
+            }
+            block::TRADING_POST => {
+                self.open(Panel::Trade);
+                true
+            }
+            block::LEVER | block::LEVER_ON => {
+                self.set_block(p, if hit.block == block::LEVER { block::LEVER_ON } else { block::LEVER });
+                self.sound(Sound::Click, Some(p.as_vec3()));
+                true
+            }
+            block::BUTTON => {
+                self.set_block(p, block::BUTTON_ON);
+                self.sound(Sound::Click, Some(p.as_vec3()));
                 true
             }
             block::CHEST | block::FURNACE | block::FURNACE_LIT => {
@@ -1326,11 +1407,28 @@ impl State {
                     _ => return,
                 }
             }
-            block::TORCH | block::RAIL => {
+            block::TORCH | block::WIRE | block::LEVER | block::BUTTON | block::PLATE | block::RTORCH => {
                 if !block::is_solid(below) {
                     return;
                 }
                 id
+            }
+            block::RAIL => {
+                if !block::is_solid(below) {
+                    return;
+                }
+                let shape = self.rail_shape(p);
+                self.set_block(p, shape);
+                self.connect_rails(p, shape);
+                self.sound(Sound::Place(0), Some(p.as_vec3()));
+                self.use_held();
+                return;
+            }
+            block::POWERED_RAIL => {
+                if !block::is_solid(below) {
+                    return;
+                }
+                block::powered_rail(self.yaw.sin().abs() > self.yaw.cos().abs(), false)
             }
             block::SAPLING | block::FLOWER_RED | block::FLOWER_YELLOW | block::TALL_GRASS => {
                 if !matches!(below, block::GRASS | block::DIRT | block::FARMLAND) {
@@ -1347,6 +1445,132 @@ impl State {
         self.set_block(p, block_id);
         self.sound(Sound::Place(material_sound(block_id)), Some(p.as_vec3()));
         self.use_held();
+    }
+
+    /// The rail shape that joins up with the rails around `p`.
+    fn rail_shape(&self, p: IVec3) -> BlockId {
+        let get = |q: IVec3| self.world.get(q.x, q.y, q.z);
+        let mut dirs: Vec<u8> = Vec::new();
+        for d in 0..4u8 {
+            let (dx, dz) = block::DIRS[d as usize];
+            let n = p + IVec3::new(dx, 0, dz);
+            if block::is_rail(get(n + IVec3::Y)) {
+                // A rail one block up: climb toward it.
+                return block::rail_up(d);
+            }
+            if block::is_rail(get(n)) || block::is_rail(get(n - IVec3::Y)) {
+                dirs.push(d);
+            }
+        }
+        let along_x = self.yaw.sin().abs() > self.yaw.cos().abs();
+        match dirs.as_slice() {
+            [] => if along_x { block::RAIL_EW } else { block::RAIL },
+            [d] => block::rail_joining(*d, (*d + 2) & 3),
+            ds => {
+                if ds.contains(&0) && ds.contains(&2) && !(along_x && ds.contains(&1) && ds.contains(&3)) {
+                    block::RAIL
+                } else if ds.contains(&1) && ds.contains(&3) {
+                    block::RAIL_EW
+                } else {
+                    block::rail_joining(ds[0], ds[1])
+                }
+            }
+        }
+    }
+
+    /// Bends loose rail ends next to a new rail at `p` so they join it.
+    fn connect_rails(&mut self, p: IVec3, shape: BlockId) {
+        let Some((exits, up)) = block::rail_exits(shape) else { return };
+        for &d in &exits {
+            let (dx, dz) = block::DIRS[d as usize];
+            let toward = (d + 2) & 3;
+            let mut n = p + IVec3::new(dx, 0, dz);
+            if up == Some(d) {
+                n.y += 1;
+            }
+            let lower = n - IVec3::Y;
+            let nb = self.world.get(n.x, n.y, n.z);
+            if nb == block::AIR && up != Some(d) && block::rail_exits(self.world.get(lower.x, lower.y, lower.z)).is_some_and(|e| e.1.is_none()) && !block::is_powered_rail(self.world.get(lower.x, lower.y, lower.z)) {
+                // The neighbour below climbs up to us.
+                self.set_block(lower, block::rail_up(toward));
+                continue;
+            }
+            let Some((nexits, _)) = block::rail_exits(nb) else { continue };
+            if nexits.contains(&toward) || block::is_powered_rail(nb) {
+                continue;
+            }
+            // Keep whichever of its ends is joined to something; turn the other toward us.
+            let joined = |e: u8| {
+                let (ex, ez) = block::DIRS[e as usize];
+                let q = n + IVec3::new(ex, 0, ez);
+                (-1..=1).any(|dy| block::is_rail(self.world.get(q.x, q.y + dy, q.z)))
+            };
+            let keep = if joined(nexits[0]) { nexits[0] } else { nexits[1] };
+            if keep != toward {
+                self.set_block(n, block::rail_joining(keep, toward));
+            }
+        }
+    }
+
+    fn place_vehicle(&mut self, kind: VehicleKind) {
+        let pos = match kind {
+            VehicleKind::Minecart | VehicleKind::Train => {
+                let Some(hit) = self.target.filter(|h| block::is_rail(h.block)) else {
+                    self.say("Put it on a rail.");
+                    return;
+                };
+                hit.pos.as_vec3() + Vec3::new(0.5, 0.07, 0.5)
+            }
+            VehicleKind::Boat => {
+                let world = &self.world;
+                let get = |x: i32, y: i32, z: i32| world.get(x, y, z);
+                match raycast_fluids(self.eye(), self.forward(), 5.0, &get) {
+                    Some(h) if block::is_liquid(h.block) => h.pos.as_vec3() + Vec3::new(0.5, 0.85, 0.5),
+                    Some(h) if h.normal.y == 1 => h.pos.as_vec3() + Vec3::new(0.5, 1.0, 0.5),
+                    _ => return,
+                }
+            }
+            VehicleKind::Car => match self.target {
+                Some(h) if h.normal.y == 1 => h.pos.as_vec3() + Vec3::new(0.5, 1.0, 0.5),
+                _ => return,
+            },
+        };
+        self.send(ToServer::PlaceVehicle { kind, pos: pos.to_array(), yaw: self.yaw });
+        self.sound(Sound::Place(0), Some(pos));
+        self.use_held();
+    }
+
+    /// Trades at a trading post: true if you had what it costs.
+    pub fn trade(&mut self, i: usize) -> bool {
+        let Some(o) = runecraft_common::village::OFFERS.get(i) else { return false };
+        let have: u32 = self.inv.iter().flatten().filter(|s| s.id == o.cost.0).map(|s| s.n as u32).sum();
+        if have < o.cost.1 as u32 {
+            return false;
+        }
+        let mut need = o.cost.1;
+        for slot in self.inv.iter_mut() {
+            if let Some(s) = slot
+                && s.id == o.cost.0
+            {
+                let take = need.min(s.n);
+                s.n -= take;
+                need -= take;
+                if s.n == 0 {
+                    *slot = None;
+                }
+                if need == 0 {
+                    break;
+                }
+            }
+        }
+        self.give_or_drop(Stack::new(o.out.0, o.out.1));
+        self.sound(Sound::Pickup, None);
+        self.save_player();
+        true
+    }
+
+    pub fn can_trade(&self, i: usize) -> bool {
+        runecraft_common::village::OFFERS.get(i).is_some_and(|o| self.inv.iter().flatten().filter(|s| s.id == o.cost.0).map(|s| s.n as u32).sum::<u32>() >= o.cost.1 as u32)
     }
 
     fn blocked_by_someone(&self, p: IVec3) -> bool {
@@ -1411,8 +1635,9 @@ impl State {
 
     fn message(&mut self, m: ToClient) {
         match m {
-            ToClient::Welcome { id, seed, spawn, time, world, motd, save } => {
+            ToClient::Welcome { id, seed, dim, spawn, time, world, motd, save } => {
                 self.my_id = id;
+                self.dim = dim;
                 self.seed = seed;
                 self.time_of_day = time;
                 self.world_label = world;
@@ -1487,6 +1712,8 @@ impl State {
             ToClient::Teleport { pos } => {
                 self.body = Body::new(Vec3::from(pos));
                 self.mining = None;
+                self.riding = None;
+                self.drive = None;
             }
             ToClient::Items(list) => {
                 let seen: HashSet<u32> = list.iter().map(|m| m.id).collect();
@@ -1533,9 +1760,30 @@ impl State {
                 }
             }
             ToClient::Weather { rain, thunder } => {
-                self.rain_target = rain;
+                self.weather_rain = rain;
+                self.rain_target = if self.dim == 0 { rain } else { 0.0 };
                 self.thunder = thunder;
             }
+            ToClient::Dimension { dim, pos } => {
+                self.world.clear();
+                self.items.clear();
+                self.vehicles.clear();
+                self.particles.clear();
+                self.riding = None;
+                self.drive = None;
+                self.mining = None;
+                self.dim = dim;
+                self.body = Body::new(Vec3::from(pos));
+                self.flying = false;
+                self.rain_target = if dim == 0 { self.weather_rain } else { 0.0 };
+                self.rain = self.rain_target;
+                if matches!(self.panel, Panel::Container | Panel::Trade) {
+                    self.close_panel();
+                }
+                self.sound(Sound::Thunder, Some(self.body.pos + Vec3::Y * 20.0));
+            }
+            ToClient::Vehicles(list) => self.vehicles_update(list),
+            ToClient::Places(list) => self.places = list,
             ToClient::Lightning { pos } => {
                 let p = Vec3::from(pos);
                 self.lightning.push((p, self.t));
@@ -1555,6 +1803,102 @@ impl State {
                 self.status = why;
             }
         }
+    }
+
+    fn vehicles_update(&mut self, list: Vec<VehicleState>) {
+        let seen: HashSet<u32> = list.iter().map(|v| v.id).collect();
+        self.vehicles.retain(|id, _| seen.contains(id));
+        let mut mine = None;
+        for v in list {
+            if let Some(&(seat, _)) = v.riders.iter().find(|r| r.1 == self.my_id) {
+                mine = Some((v.id, seat, v.kind, Vec3::from(v.pos), v.yaw));
+            }
+            let driving_it = self.drive.is_some() && self.riding.is_some_and(|r| r.0 == v.id);
+            match self.vehicles.get_mut(&v.id) {
+                Some(view) => {
+                    if !driving_it {
+                        view.state = v;
+                    } else {
+                        view.state.riders = v.riders;
+                    }
+                }
+                None => {
+                    let (pos, yaw) = (Vec3::from(v.pos), v.yaw);
+                    self.vehicles.insert(v.id, VehicleView { state: v, pos, yaw });
+                }
+            }
+        }
+        match mine {
+            Some((id, seat, kind, pos, yaw)) => {
+                if self.riding != Some((id, seat)) {
+                    self.riding = Some((id, seat));
+                    self.flying = false;
+                    self.drive = None;
+                    if seat == 0 {
+                        let world = &self.world;
+                        let get = |x: i32, y: i32, z: i32| world.get(x, y, z);
+                        self.drive = Some(Drive::new(kind, pos, yaw, &get));
+                    }
+                    self.say(match kind {
+                        VehicleKind::Train if seat == 0 => "All aboard! W to go, S to brake and reverse, Shift to get off.",
+                        VehicleKind::Minecart => "W pushes the cart along the rails. Shift to get out.",
+                        _ if seat == 0 => "W/S to drive, A/D to steer, Shift to get out.",
+                        _ => "You're a passenger. Shift to get out.",
+                    });
+                }
+            }
+            None => {
+                if self.riding.is_some() {
+                    self.riding = None;
+                    self.drive = None;
+                }
+            }
+        }
+    }
+
+    /// Leaves your vehicle, stepping out beside it.
+    pub fn get_out(&mut self) {
+        let Some((id, _)) = self.riding.take() else { return };
+        self.drive = None;
+        self.send(ToServer::Dismount);
+        if let Some(v) = self.vehicles.get(&id) {
+            let side = vehicle::forward(v.yaw + std::f32::consts::FRAC_PI_2) * (v.state.kind.half_size().x + 0.6);
+            self.body = Body::new(v.pos + side + Vec3::Y * 0.6);
+        }
+    }
+
+    /// Driving or riding, instead of walking. True if you're in a vehicle.
+    fn step_vehicle(&mut self, dt: f32) -> bool {
+        let Some((id, seat)) = self.riding else { return false };
+        if self.playing() && self.shift {
+            self.get_out();
+            return true;
+        }
+        let world = &self.world;
+        let get = |x: i32, y: i32, z: i32| world.get(x, y, z);
+        if let Some(d) = &mut self.drive {
+            let k = |key: &str| self.screen == Screen::Playing && self.panel == Panel::None && self.held.contains(key);
+            let throttle = if k("w") { 1.0 } else if k("s") { -1.0 } else { 0.0 };
+            let steer = if k("d") { 1.0 } else if k("a") { -1.0 } else { 0.0 };
+            d.step(dt, Controls { throttle, steer }, &get);
+            let cars = d.cars(&get);
+            let (pos, yaw, speed, kind) = (d.pos, d.yaw, d.speed, d.kind);
+            if let Some(v) = self.vehicles.get_mut(&id) {
+                v.state.pos = pos.to_array();
+                v.state.yaw = yaw;
+                v.state.cars = cars.clone();
+                v.pos = pos;
+                v.yaw = yaw;
+            }
+            self.body = Body::new(vehicle::seat_pos(kind, pos, yaw, &cars, seat) - Vec3::Y * 0.55);
+            if self.t - self.vehicle_sent > 0.05 {
+                self.vehicle_sent = self.t;
+                self.send(ToServer::VehicleMove { id, pos: pos.to_array(), yaw, speed, cars });
+            }
+        } else if let Some(v) = self.vehicles.get(&id) {
+            self.body = Body::new(vehicle::seat_pos(v.state.kind, v.pos, v.yaw, &v.state.cars, seat) - Vec3::Y * 0.55);
+        }
+        true
     }
 
     pub fn hurt(&mut self, amount: f32) {
@@ -1603,7 +1947,7 @@ impl State {
 
         let feet = self.body.pos.floor().as_ivec3();
         let ready = self.world.loaded(feet.x, feet.z);
-        if ready && self.panel != Panel::Sleeping {
+        if ready && self.panel != Panel::Sleeping && !self.step_vehicle(dt) {
             self.step_player(dt);
         }
         self.update_target();
@@ -1736,6 +2080,26 @@ impl State {
         let eye = self.eye();
         let dir = self.forward();
         self.target = if self.screen == Screen::Playing { raycast(eye, dir, reach, &get) } else { None };
+        // Vehicles: the nearest box the ray passes through.
+        self.vehicle_target = None;
+        for (id, v) in &self.vehicles {
+            if self.riding.is_some_and(|r| r.0 == *id) {
+                continue;
+            }
+            let h = v.state.kind.half_size();
+            let r = h.x.max(h.z);
+            let mut boxes = vec![v.pos];
+            boxes.extend(v.state.cars.iter().map(|c| Vec3::new(c[0], c[1], c[2])));
+            for c in boxes {
+                let (min, max) = (c - Vec3::new(r, 0.0, r), c + Vec3::new(r, h.y, r));
+                if let Some(t) = ray_box(eye, dir, min, max)
+                    && t <= reach
+                    && self.vehicle_target.is_none_or(|(_, d)| t < d)
+                {
+                    self.vehicle_target = Some((*id, t));
+                }
+            }
+        }
     }
 
     fn step_mining(&mut self, dt: f32) {
@@ -1874,7 +2238,16 @@ impl State {
             self.particles.drain(0..n);
         }
         // Rain and snow around you, where the sky is open.
-        if self.rain > 0.05 {
+        if self.dim == 1 {
+            // Embers drift up in the Ember realm.
+            let eye = self.body.pos;
+            for i in 0..(dt * 40.0) as i32 + 1 {
+                let r = |k: i32| unit(hash3(self.t.to_bits(), i, k, 9)) - 0.5;
+                let pos = eye + Vec3::new(r(1) * 30.0, r(2) * 16.0, r(3) * 30.0);
+                self.particles.push(Particle { pos, vel: Vec3::new(r(4), 1.2, r(5)), tile: block::tile::FLAME, life: 2.5, size: 0.05, gravity: -0.2, glow: true });
+            }
+        }
+        if self.rain > 0.05 && self.dim == 0 {
             let eye = self.body.pos;
             let biome = runecraft_common::worldgen::sample(self.seed, eye.x as i32, eye.z as i32).biome;
             let cold = matches!(biome, runecraft_common::worldgen::Biome::Snowy) || eye.y > 140.0;
@@ -1910,6 +2283,21 @@ impl State {
 
     fn animate_others(&mut self, dt: f32) {
         let k = (dt * 12.0).min(1.0);
+        let mine = self.drive.as_ref().and(self.riding).map(|r| r.0);
+        for (id, v) in self.vehicles.iter_mut() {
+            if Some(*id) == mine {
+                continue;
+            }
+            let target = Vec3::from(v.state.pos);
+            if v.pos.distance(target) > 10.0 {
+                v.pos = target;
+            } else {
+                v.pos += (target - v.pos) * k;
+            }
+            let mut dy = v.state.yaw - v.yaw;
+            dy = (dy + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            v.yaw += dy * k;
+        }
         for o in self.others.values_mut() {
             let target = Vec3::from(o.target.pos);
             let before = o.pos;
@@ -1946,9 +2334,22 @@ impl State {
     }
 
     pub fn biome_here(&self) -> &'static str {
+        match self.dim {
+            1 => return "Ember realm",
+            2 => return "Sky realm",
+            _ => {}
+        }
         let p = self.body.pos.floor().as_ivec3();
         runecraft_common::worldgen::sample(self.seed, p.x, p.z).biome.name()
     }
+}
+
+/// Distance along a ray to where it enters a box, if it does.
+fn ray_box(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
+    let inv = Vec3::ONE / d;
+    let (t1, t2) = ((min - o) * inv, (max - o) * inv);
+    let (near, far) = (t1.min(t2).max_element(), t1.max(t2).min_element());
+    (far >= near.max(0.0)).then_some(near.max(0.0))
 }
 
 pub fn compass(d: Vec3) -> &'static str {

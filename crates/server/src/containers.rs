@@ -36,7 +36,7 @@ impl World {
             block::FURNACE | block::FURNACE_LIT => ContainerKind::Furnace,
             _ => return,
         };
-        let c = self.containers.entry(pos).or_insert_with(|| Container::new(kind));
+        let c = self.lv.containers.entry(pos).or_insert_with(|| Container::new(kind));
         let msg = c.message(pos);
         if let Some(p) = self.players.get_mut(&conn) {
             p.open = Some(pos);
@@ -45,7 +45,7 @@ impl World {
     }
 
     pub(crate) fn set_container_slot(&mut self, pos: [i32; 3], slot: u8, stack: Option<Stack>) {
-        let Some(c) = self.containers.get_mut(&pos) else { return };
+        let Some(c) = self.lv.containers.get_mut(&pos) else { return };
         if let Some(s) = c.slots.get_mut(slot as usize) {
             *s = stack.filter(|s| s.n > 0);
             self.dirty = true;
@@ -54,34 +54,34 @@ impl World {
     }
 
     fn sync_container(&self, pos: [i32; 3]) {
-        let Some(c) = self.containers.get(&pos) else { return };
+        let Some(c) = self.lv.containers.get(&pos) else { return };
         let msg = c.message(pos);
         for p in self.players.values() {
-            if p.open == Some(pos) {
+            if p.open == Some(pos) && p.dim == self.dim {
                 p.send(&msg);
             }
         }
     }
 
     pub(crate) fn spill_container(&mut self, pos: [i32; 3]) {
-        let Some(c) = self.containers.remove(&pos) else { return };
+        let Some(c) = self.lv.containers.remove(&pos) else { return };
         let at = Vec3::new(pos[0] as f32 + 0.5, pos[1] as f32 + 0.5, pos[2] as f32 + 0.5);
         for s in c.slots.into_iter().flatten() {
             let vel = Vec3::new(self.rand() - 0.5, 0.6, self.rand() - 0.5) * 4.0;
             self.spawn_item(s, at, vel, 0.5);
         }
         for p in self.players.values_mut() {
-            if p.open == Some(pos) {
+            if p.open == Some(pos) && p.dim == self.dim {
                 p.open = None;
             }
         }
     }
 
     pub(crate) fn tick_containers(&mut self, dt: f32) {
-        let furnaces: Vec<[i32; 3]> = self.containers.iter().filter(|(_, c)| c.kind == ContainerKind::Furnace).map(|(p, _)| *p).collect();
+        let furnaces: Vec<[i32; 3]> = self.lv.containers.iter().filter(|(_, c)| c.kind == ContainerKind::Furnace).map(|(p, _)| *p).collect();
         for pos in furnaces {
             let (changed, lit) = {
-                let c = self.containers.get_mut(&pos).unwrap();
+                let c = self.lv.containers.get_mut(&pos).unwrap();
                 let before = (c.burn > 0.0, c.slots.clone());
                 let out = c.slots[0].and_then(|s| smelt(s.id));
                 let can = out.is_some_and(|o| c.slots[2].is_none_or(|s| s.id == o && s.n < block::max_stack(o)));

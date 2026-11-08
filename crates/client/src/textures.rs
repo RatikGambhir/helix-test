@@ -882,6 +882,291 @@ fn paint(id: u8) -> Painter {
             p.line(3.0, 4.0, 8.0, 1.0, hex(0x9a9a9a));
             p.line(8.0, 1.0, 13.0, 4.0, hex(0x9a9a9a));
         }
+        t::REDSTONE_ORE => {
+            p.noise(0x7d7d7d, 0.22);
+            p.blobs(0xc81a12, 5, 21);
+            p.specks(0xff4a3a, 0.04, 22);
+        }
+        t::WIRE | t::WIRE_ON => {
+            p.clear();
+            let c = if id == t::WIRE_ON { 0xff3020 } else { 0x6a0e0a };
+            for i in 0..16 {
+                for w in 7..9 {
+                    let k = 0.85 + p.r(i, w, 3) * 0.3;
+                    p.set(i, w, mul(hex(c), k), 1.0);
+                    p.set(w, i, mul(hex(c), k), 1.0);
+                }
+            }
+            for (x, y) in [(6, 6), (9, 6), (6, 9), (9, 9), (5, 8), (10, 7)] {
+                p.set(x, y, hex(c), 1.0);
+            }
+        }
+        t::LEVER => {
+            p.clear();
+            p.line(4.0, 14.0, 10.0, 4.0, hex(0x7a5a32));
+            p.line(5.0, 14.0, 11.0, 4.0, hex(0x5e4529));
+            for y in 12..16 {
+                for x in 2..14 {
+                    p.set(x, y, mul(hex(0x7d7d7d), 0.85 + p.r(x, y, 2) * 0.3), 1.0);
+                }
+            }
+        }
+        t::BUTTON => {
+            p.clear();
+            for y in 5..11 {
+                for x in 4..12 {
+                    p.set(x, y, mul(hex(0x8a8a8a), if y == 5 || x == 4 { 1.2 } else { 0.9 + p.r(x, y, 2) * 0.2 }), 1.0);
+                }
+            }
+        }
+        t::RTORCH | t::RTORCH_OFF => {
+            p.clear();
+            for y in 6..16 {
+                for x in 7..9 {
+                    p.set(x, y, mul(hex(0x7a5a32), 0.9 + (x - 7) as f32 * 0.15), 1.0);
+                }
+            }
+            let (a, b) = if id == t::RTORCH { (0xff3a2a, 0xffb0a0) } else { (0x5a1410, 0x7a2018) };
+            for (x, y, c) in [(7, 5, a), (8, 5, a), (7, 6, a), (8, 6, a), (7, 4, b), (8, 4, b)] {
+                p.set(x, y, hex(c), 1.0);
+            }
+        }
+        t::LAMP | t::LAMP_ON => {
+            let (glass, glow) = if id == t::LAMP_ON { (0xf7c46a, 0xfff2c0) } else { (0x6a4a2a, 0x8a6a40) };
+            p.noise(glass, 0.15);
+            p.blobs(glow, 6, 4);
+            p.frame(0x3d2a18, 0);
+            for i in 0..16 {
+                p.set(i, 8, hex(0x3d2a18), 1.0);
+                p.set(8, i, hex(0x3d2a18), 1.0);
+            }
+        }
+        t::REDSTONE_BLOCK => {
+            p.noise(0xb3140c, 0.25);
+            p.specks(0xff4030, 0.1, 3);
+            p.frame(0x8a0e08, 0);
+        }
+        t::RAIL_EW => {
+            let r = paint(t::RAIL);
+            for y in 0..16 {
+                for x in 0..16 {
+                    p.px[(y * 16 + x) as usize] = r.px[(x * 16 + y) as usize];
+                }
+            }
+        }
+        _ if (t::RAIL_CURVE..t::RAIL_CURVE + 4).contains(&id) => {
+            p.clear();
+            // Ties and two curved rails joining the north edge with the east (then mirrored).
+            let k = id - t::RAIL_CURVE;
+            let (fx, fy) = (k == 1 || k == 3, k >= 2);
+            let put = |p: &mut Painter, x: i32, y: i32, c: Rgb| {
+                let (x, y) = (if fx { 15 - x } else { x }, if fy { 15 - y } else { y });
+                p.set(x, y, c, 1.0);
+            };
+            for i in 0..5 {
+                let a = (i as f32 + 0.5) / 5.0 * std::f32::consts::FRAC_PI_2;
+                for r in 2..15 {
+                    let (x, y) = (16.0 - (r as f32) * a.cos(), r as f32 * a.sin());
+                    put(&mut p, x as i32, y as i32, hex(0x7a5a32));
+                }
+            }
+            for r in [4.5f32, 12.5] {
+                for j in 0..40 {
+                    let a = j as f32 / 39.0 * std::f32::consts::FRAC_PI_2;
+                    put(&mut p, (16.0 - r * a.cos()) as i32, (r * a.sin()) as i32, hex(0xb8b8b8));
+                }
+            }
+        }
+        _ if (t::POWERED_RAIL..t::POWERED_RAIL + 4).contains(&id) => {
+            let k = id - t::POWERED_RAIL;
+            let base = paint(if k % 2 == 1 { t::RAIL_EW } else { t::RAIL });
+            p.px = base.px;
+            let c = if k >= 2 { 0xff3020 } else { 0x6a0e0a };
+            for i in 0..16 {
+                if k % 2 == 1 {
+                    p.set(i, 7, hex(c), 1.0);
+                    p.set(i, 8, hex(0xe5c04a), 1.0);
+                    for y in [3, 12] {
+                        p.set(i, y, hex(0xe5c04a), 1.0);
+                    }
+                } else {
+                    p.set(7, i, hex(c), 1.0);
+                    p.set(8, i, hex(0xe5c04a), 1.0);
+                    for x in [3, 12] {
+                        p.set(x, i, hex(0xe5c04a), 1.0);
+                    }
+                }
+            }
+        }
+        t::TRADE_TOP => {
+            p.px = paint(t::PLANKS).px;
+            for y in 3..13 {
+                for x in 3..13 {
+                    p.set(x, y, mul(hex(0x3f8a3a), 0.9 + p.r(x, y, 4) * 0.2), 1.0);
+                }
+            }
+            for (x, y) in [(6, 6), (7, 5), (8, 5), (9, 6), (7, 9), (8, 9), (6, 8), (9, 8)] {
+                p.set(x, y, hex(0x5ff07a), 1.0);
+            }
+        }
+        t::TRADE_SIDE => {
+            p.px = paint(t::PLANKS).px;
+            p.frame(0x5a3d1e, 0);
+            for x in 0..16 {
+                p.set(x, 3, hex(0xb02e26), 1.0);
+                p.set(x, 4, if x % 4 < 2 { hex(0xeeeeee) } else { hex(0xb02e26) }, 1.0);
+            }
+            for (x, y) in [(5, 9), (6, 8), (7, 8), (8, 9), (6, 10), (7, 10), (10, 9), (11, 8), (11, 10)] {
+                p.set(x, y, hex(0x3fd060), 1.0);
+            }
+        }
+        t::EMERALD_ORE => {
+            p.noise(0x7d7d7d, 0.22);
+            p.blobs(0x2fd060, 3, 31);
+            p.specks(0x9cffb0, 0.02, 32);
+        }
+        t::EMERALD_BLOCK => {
+            p.noise(0x2fb855, 0.18);
+            p.bevel(0x2fb855);
+            for i in 3..13 {
+                p.set(i, i, hex(0x8affa8), 1.0);
+            }
+        }
+        t::EMERALD => {
+            p.clear();
+            for y in 2..14 {
+                let w = 6 - (y - 8i32).abs() / 2 - if y < 5 { 5 - y } else { 0 };
+                for x in (8 - w.max(1))..(8 + w.max(1)) {
+                    p.set(x, y, mul(hex(0x2fd060), 0.8 + (14 - y) as f32 * 0.03), 1.0);
+                }
+            }
+            p.set(6, 5, hex(0xc0ffd0), 1.0);
+            p.set(7, 4, hex(0xc0ffd0), 1.0);
+        }
+        t::EMBERSTONE => {
+            p.noise(0x6e2a26, 0.3);
+            p.specks(0x8a3a30, 0.15, 2);
+            p.specks(0x4a1614, 0.12, 3);
+        }
+        t::EMBER_BRICK => {
+            p.bricks(0x3a1a1c, 0x1e0c0e, 8, 4);
+        }
+        t::QUARTZ_ORE => {
+            p.px = paint(t::EMBERSTONE).px;
+            p.blobs(0xece6dc, 5, 7);
+        }
+        t::QUARTZ => {
+            p.clear();
+            for y in 4..13 {
+                for x in 4..12 {
+                    if (x + y) % 9 < 6 {
+                        p.set(x, y, mul(hex(0xf2ece2), 0.85 + p.r(x, y, 2) * 0.2), 1.0);
+                    }
+                }
+            }
+        }
+        t::ASH_SAND => {
+            p.noise(0x54443a, 0.25);
+            p.specks(0x3a2e26, 0.15, 3);
+            p.specks(0x7a6a5a, 0.05, 4);
+        }
+        t::EMBER_PORTAL | t::SKY_PORTAL => {
+            let (a, b) = if id == t::EMBER_PORTAL { (0x7a1fd0, 0xc070ff) } else { (0x3aa8e8, 0xe8f8ff) };
+            for y in 0..16 {
+                for x in 0..16 {
+                    let w = ((x as f32 * 0.7 + (y as f32 * 0.9).sin() * 2.0).sin() * 0.5 + 0.5) * 0.6 + p.r(x, y, 2) * 0.4;
+                    p.set(x, y, mix(hex(a), hex(b), w), 0.85);
+                }
+            }
+        }
+        t::CLOUDSTONE => {
+            p.noise(0xd8dde6, 0.1);
+            p.blobs(0xf4f6fa, 6, 3);
+            p.specks(0xb8c0cc, 0.06, 4);
+        }
+        t::FLINT_STEEL => {
+            p.clear();
+            for y in 3..9 {
+                for x in 3..9 {
+                    if (x - 6) * (x - 6) + (y - 6) * (y - 6) < 10 {
+                        p.set(x, y, mul(hex(0x3a3a3a), 0.8 + p.r(x, y, 2) * 0.4), 1.0);
+                    }
+                }
+            }
+            p.line(8.0, 13.0, 13.0, 8.0, hex(0xcfcfcf));
+            p.line(8.0, 12.0, 12.0, 8.0, hex(0x9a9a9a));
+            p.line(9.0, 13.0, 13.0, 9.0, hex(0x9a9a9a));
+        }
+        t::MINECART | t::TRAIN => {
+            p.clear();
+            let body = if id == t::TRAIN { 0x3a3a46 } else { 0x8a8a8a };
+            for y in 5..12 {
+                for x in 2..14 {
+                    p.set(x, y, mul(hex(body), if y == 5 { 1.25 } else { 0.85 + p.r(x, y, 2) * 0.2 }), 1.0);
+                }
+            }
+            if id == t::TRAIN {
+                for y in 1..5 {
+                    for x in 9..12 {
+                        p.set(x, y, hex(0x222228), 1.0);
+                    }
+                }
+                for x in 2..14 {
+                    p.set(x, 8, hex(0xb02e26), 1.0);
+                }
+            }
+            for x in [4, 11] {
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    p.set(x + dx, 12 + dy, hex(0x222222), 1.0);
+                }
+            }
+        }
+        t::BOAT => {
+            p.clear();
+            for y in 7..12 {
+                let inset = (y - 7) as i32;
+                for x in (1 + inset)..(15 - inset) {
+                    p.set(x, y, mul(hex(0xa07a45), 0.85 + p.r(x, y, 2) * 0.2), 1.0);
+                }
+            }
+            p.line(8.0, 2.0, 8.0, 7.0, hex(0x6b5132));
+        }
+        t::CAR => {
+            p.clear();
+            for y in 7..12 {
+                for x in 1..15 {
+                    p.set(x, y, mul(hex(0xc8281e), 0.9 + p.r(x, y, 2) * 0.15), 1.0);
+                }
+            }
+            for y in 4..7 {
+                for x in 4..12 {
+                    p.set(x, y, if x == 4 || x == 11 || y == 4 { hex(0xa01e18) } else { hex(0xa8d8f0) }, 1.0);
+                }
+            }
+            for x in [3, 11] {
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    p.set(x + dx, 12 + dy, hex(0x1a1a1a), 1.0);
+                }
+            }
+        }
+        t::TIRE => {
+            p.noise(0x1e1e1e, 0.2);
+            for i in 5..11 {
+                p.set(i, 7, hex(0x9a9a9a), 1.0);
+                p.set(i, 8, hex(0x9a9a9a), 1.0);
+            }
+        }
+        _ if (t::CAR_PAINT..t::CAR_PAINT + 4).contains(&id) => {
+            let c = [0xc8281e, 0xf2c21a, 0x2a5ad0, 0xeeeeee][(id - t::CAR_PAINT) as usize];
+            p.noise(c, 0.06);
+            for x in 0..16 {
+                p.set(x, 0, mul(hex(c), 1.2), 1.0);
+            }
+        }
+        t::HEADLIGHT => {
+            p.noise(0xfff6c8, 0.05);
+            p.frame(0x9a9a9a, 0);
+        }
         t::RAIN => {
             p.clear();
             for y in 0..16 {

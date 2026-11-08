@@ -79,6 +79,7 @@ const C: (char, Want) = ('C', Item(COBBLE));
 const I: (char, Want) = ('I', Item(IRON_INGOT));
 const D: (char, Want) = ('D', Item(DIAMOND));
 const G: (char, Want) = ('G', Item(GOLD_INGOT));
+const R: (char, Want) = ('R', Item(WIRE));
 
 macro_rules! tools {
     ($m:ident, $wood:expr, $stone:expr, $iron:expr, $dia:expr) => {
@@ -129,6 +130,26 @@ pub static RECIPES: std::sync::LazyLock<Vec<Recipe>> = std::sync::LazyLock::new(
         Recipe { out: IRON_INGOT, count: 9, pattern: &["B"], key: &[('B', Item(IRON_BLOCK))], shapeless: true },
         Recipe { out: GOLD_INGOT, count: 9, pattern: &["B"], key: &[('B', Item(GOLD_BLOCK))], shapeless: true },
         Recipe { out: DIAMOND, count: 9, pattern: &["B"], key: &[('B', Item(DIAMOND_BLOCK))], shapeless: true },
+        // Redstone
+        shaped(LEVER, 1, &["S", "C"], &[S, C]),
+        Recipe { out: BUTTON, count: 1, pattern: &["T"], key: &[('T', Item(STONE))], shapeless: true },
+        shaped(PLATE, 1, &["TT"], &[('T', Item(STONE))]),
+        shaped(RTORCH, 1, &["R", "S"], &[R, S]),
+        shaped(LAMP, 1, &[" R ", "RGR", " R "], &[R, ('G', Item(GLOWSTONE))]),
+        shaped(REDSTONE_BLOCK, 1, &["RRR", "RRR", "RRR"], &[R]),
+        Recipe { out: WIRE, count: 9, pattern: &["B"], key: &[('B', Item(REDSTONE_BLOCK))], shapeless: true },
+        shaped(POWERED_RAIL, 6, &["G G", "GSG", "GRG"], &[G, S, R]),
+        // Vehicles
+        shaped(MINECART, 1, &["I I", "III"], &[I]),
+        shaped(TRAIN, 1, &["I I", "IFI", "III"], &[I, ('F', Item(FURNACE))]),
+        shaped(BOAT, 1, &["P P", "PPP"], &[P]),
+        shaped(CAR, 1, &[" W ", "III", "K K"], &[I, ('W', Item(GLASS)), ('K', Item(COAL))]),
+        // Trading and the realms
+        shaped(TRADING_POST, 1, &["E", "T"], &[('E', Item(EMERALD)), ('T', Item(CRAFTING_TABLE))]),
+        shaped(EMERALD_BLOCK, 1, &["EEE", "EEE", "EEE"], &[('E', Item(EMERALD))]),
+        Recipe { out: EMERALD, count: 9, pattern: &["B"], key: &[('B', Item(EMERALD_BLOCK))], shapeless: true },
+        Recipe { out: FLINT_STEEL, count: 1, pattern: &["IG"], key: &[I, ('G', Item(GRAVEL))], shapeless: true },
+        shaped(EMBER_BRICK, 4, &["QQ", "QQ"], &[('Q', Item(QUARTZ))]),
     ];
     r.extend(tools!(PICK, WOOD_PICK, STONE_PICK, IRON_PICK, DIAMOND_PICK));
     r.extend(tools!(AXE, WOOD_AXE, WOOD_AXE + 1, WOOD_AXE + 2, DIAMOND_AXE));
@@ -196,6 +217,11 @@ pub fn smelt(id: BlockId) -> Option<BlockId> {
         OAK_LOG | BIRCH_LOG | SPRUCE_LOG => COAL,
         CACTUS => WOOL_GREEN,
         STONE => STONE_BRICK,
+        EMBERSTONE => EMBER_BRICK,
+        ASH_SAND => GLASS,
+        REDSTONE_ORE => WIRE,
+        QUARTZ_ORE => QUARTZ,
+        EMERALD_ORE => EMERALD,
         _ => return None,
     })
 }
@@ -224,5 +250,15 @@ mod tests {
         assert_eq!(grid(&[p, p, n, s, p, n, s, n, n]), Some(WOOD_AXE), "mirrored axe");
         assert_eq!(grid(&[Some(BIRCH_LOG), n, n, n]), Some(PLANKS), "any log, shapeless");
         assert_eq!(grid(&[p, s, n, n]), None);
+        let i = Some(IRON_INGOT);
+        assert_eq!(grid(&[i, n, i, i, i, i, n, n, n]), Some(MINECART));
+        assert_eq!(grid(&[Some(WIRE), n, s, n]), Some(RTORCH));
+        // No two recipes share a pattern.
+        for (a, ra) in RECIPES.iter().enumerate() {
+            for rb in RECIPES.iter().skip(a + 1) {
+                let same = ra.pattern == rb.pattern && ra.shapeless == rb.shapeless && ra.ingredients().iter().map(|(w, n)| (w.example(), *n)).eq(rb.ingredients().iter().map(|(w, n)| (w.example(), *n)));
+                assert!(!same, "{} and {} clash", item_name(ra.out), item_name(rb.out));
+            }
+        }
     }
 }

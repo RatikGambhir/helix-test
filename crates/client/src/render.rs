@@ -9,7 +9,8 @@ use crate::game::View;
 use runecraft_common::block;
 use glam::{Mat4, Vec3, Vec4};
 use rune::compose::{Compositor, DeviceKey, Frame};
-use std::collections::HashMap;
+use runecraft_common::protocol::VehicleKind;
+use std::collections::{HashMap, HashSet};
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -317,6 +318,15 @@ impl Compositor<State> for Gfx {
             let mut hor = mixv(Vec3::new(0.05, 0.06, 0.12), Vec3::new(0.72, 0.84, 1.0), day);
             hor = mixv(hor, Vec3::new(1.0, 0.55, 0.3), dusk * 0.6);
             top = mixv(top, Vec3::new(0.35, 0.3, 0.55), dusk * 0.3);
+            if s.dim == 1 {
+                // The Ember realm: a smoky red haze, no sky.
+                top = Vec3::new(0.18, 0.04, 0.03);
+                hor = Vec3::new(0.32, 0.08, 0.04);
+            } else if s.dim == 2 {
+                // The Sky realm: brighter and paler, open all round.
+                top = mixv(top, Vec3::new(0.55, 0.72, 1.0), 0.4);
+                hor = mixv(hor, Vec3::new(0.92, 0.95, 1.0), 0.5 * day);
+            }
             let underwater = {
                 let e = eye.floor().as_ivec3();
                 s.world.get(e.x, e.y, e.z) == runecraft_common::block::WATER
@@ -328,6 +338,8 @@ impl Compositor<State> for Gfx {
             let far = (s.view_distance as f32 - 1.0) * CHUNK as f32;
             let (fog, near, far) = if in_lava {
                 (Vec3::new(0.9, 0.3, 0.05), 0.0, 3.0)
+            } else if s.dim == 1 {
+                (hor, far * 0.15, far * 0.75)
             } else if underwater {
                 (Vec3::new(0.08, 0.2, 0.45) * day.max(0.3), 2.0, 28.0)
             } else {
@@ -351,7 +363,7 @@ impl Compositor<State> for Gfx {
                 sky_top: top.extend(1.0).to_array(),
                 sky_hor: [hor.x, hor.y, hor.z, far],
                 fog: [fog.x, fog.y, fog.z, near],
-                misc: [if inner.format.is_srgb() { 1.0 } else { 0.0 }, if underwater || in_lava { 1.0 } else { 0.0 }, flash, 0.0],
+                misc: [if inner.format.is_srgb() { 1.0 } else { 0.0 }, if underwater || in_lava { 1.0 } else { 0.0 }, flash, if s.dim == 1 { 0.42 } else { 0.0 }],
             };
             f.queue.write_buffer(&inner.uniforms, 0, bytemuck::bytes_of(&u));
 
@@ -569,6 +581,25 @@ fn humanoid(out: &mut Vec<Vertex>, pos: Vec3, yaw: f32, pitch: f32, walk: f32, s
     push_box(out, part(base, neck, pitch), Vec3::new(-0.25, 1.5, -0.25), Vec3::new(0.5, 0.5, 0.5), [look.skin, look.skin, look.hair, look.skin, look.hair, look.face], light, flags);
 }
 
+/// Someone sitting in a vehicle: legs forward, arms on the wheel.
+fn humanoid_sitting(out: &mut Vec<Vertex>, pos: Vec3, yaw: f32, pitch: f32, look: &Look, held: u8, light: [u8; 2]) {
+    let base = Mat4::from_translation(pos) * Mat4::from_rotation_y(-yaw);
+    let hip = Vec3::new(0.0, 0.75, 0.0);
+    let l = look.limb;
+    let legs = std::f32::consts::FRAC_PI_2;
+    push_box(out, part(base, hip, legs), Vec3::new(-l, 0.0, -l / 2.0), Vec3::new(l, 0.75, l), [look.pants; 6], light, 0);
+    push_box(out, part(base, hip, legs), Vec3::new(0.0, 0.0, -l / 2.0), Vec3::new(l, 0.75, l), [look.pants; 6], light, 0);
+    push_box(out, base, Vec3::new(-0.25, 0.75, -0.125), Vec3::new(0.5, 0.75, 0.25), [look.shirt; 6], light, 0);
+    let shoulder = Vec3::new(0.0, 1.45, 0.0);
+    let arm_tiles = [look.shirt, look.shirt, look.shirt, look.skin, look.shirt, look.shirt];
+    push_box(out, part(base, shoulder, 1.1), Vec3::new(-0.25 - l, 0.75, -l / 2.0), Vec3::new(l, 0.75, l), arm_tiles, light, 0);
+    let right = part(base, shoulder, 1.1);
+    push_box(out, right, Vec3::new(0.25, 0.75, -l / 2.0), Vec3::new(l, 0.75, l), arm_tiles, light, 0);
+    held_box(out, right * Mat4::from_translation(Vec3::new(0.25 + l / 2.0, 0.8, 0.0)), held, light, 0);
+    let neck = Vec3::new(0.0, 1.5, 0.0);
+    push_box(out, part(base, neck, pitch), Vec3::new(-0.25, 1.5, -0.25), Vec3::new(0.5, 0.5, 0.5), [look.skin, look.skin, look.hair, look.skin, look.hair, look.face], light, 0);
+}
+
 fn item(out: &mut Vec<Vertex>, pos: Vec3, id: u8, t: f64, salt: u32, light: [u8; 2]) {
     let spin = (t as f32 * 1.6 + salt as f32) % std::f32::consts::TAU;
     let bob = ((t as f32 * 2.5 + salt as f32).sin() + 1.0) * 0.06;
@@ -582,16 +613,94 @@ fn item(out: &mut Vec<Vertex>, pos: Vec3, id: u8, t: f64, salt: u32, light: [u8;
     }
 }
 
+/// A box in a vehicle's own space: x right, y up, -z forward.
+fn vbox(out: &mut Vec<Vertex>, m: Mat4, min: [f32; 3], size: [f32; 3], t: u8, light: [u8; 2]) {
+    push_box(out, m, Vec3::from(min), Vec3::from(size), [t; 6], light, 0);
+}
+
+fn wheels(out: &mut Vec<Vertex>, m: Mat4, half_w: f32, zs: &[f32], r: f32, light: [u8; 2]) {
+    for &z in zs {
+        for side in [-1.0f32, 1.0] {
+            let x = if side < 0.0 { -half_w - 0.08 } else { half_w - 0.12 };
+            vbox(out, m, [x, 0.0, z - r], [0.2, r * 2.0, r * 2.0], tile::TIRE, light);
+        }
+    }
+}
+
+fn vehicle_model(out: &mut Vec<Vertex>, kind: VehicleKind, pos: Vec3, yaw: f32, id: u32, car: bool, light: [u8; 2]) {
+    let m = Mat4::from_translation(pos) * Mat4::from_rotation_y(-yaw);
+    match kind {
+        VehicleKind::Minecart => {
+            vbox(out, m, [-0.5, 0.12, -0.65], [1.0, 0.1, 1.3], tile::STEEL, light);
+            for (min, size) in [([-0.5, 0.12, -0.65], [0.08, 0.5, 1.3]), ([0.42, 0.12, -0.65], [0.08, 0.5, 1.3]), ([-0.5, 0.12, -0.65], [1.0, 0.5, 0.08]), ([-0.5, 0.12, 0.57], [1.0, 0.5, 0.08])] {
+                vbox(out, m, min, size, tile::IRON_BLOCK, light);
+            }
+            wheels(out, m, 0.5, &[-0.4, 0.4], 0.12, light);
+        }
+        VehicleKind::Train if car => {
+            vbox(out, m, [-0.6, 0.18, -1.05], [1.2, 0.15, 2.1], tile::STEEL, light);
+            vbox(out, m, [-0.55, 0.33, -1.0], [1.1, 0.05, 2.0], tile::PLANKS, light);
+            for (min, size) in [([-0.6, 0.33, -1.05], [0.08, 0.55, 2.1]), ([0.52, 0.33, -1.05], [0.08, 0.55, 2.1]), ([-0.6, 0.33, -1.05], [1.2, 0.55, 0.08]), ([-0.6, 0.33, 0.97], [1.2, 0.55, 0.08])] {
+                vbox(out, m, min, size, tile::CAR_PAINT + 1, light);
+            }
+            wheels(out, m, 0.6, &[-0.7, 0.7], 0.15, light);
+        }
+        VehicleKind::Train => {
+            vbox(out, m, [-0.6, 0.18, -1.2], [1.2, 0.22, 2.4], tile::STEEL, light);
+            vbox(out, m, [-0.45, 0.4, -1.2], [0.9, 0.8, 1.45], tile::CAR_PAINT, light);
+            vbox(out, m, [-0.6, 0.4, 0.25], [1.2, 1.25, 0.95], tile::CAR_PAINT + 2, light);
+            vbox(out, m, [-0.5, 1.05, 0.2], [1.0, 0.4, 0.06], tile::WINDOW_BLUE, light);
+            vbox(out, m, [-0.65, 1.65, 0.2], [1.3, 0.1, 1.05], tile::BLACK, light);
+            vbox(out, m, [-0.15, 1.2, -1.0], [0.3, 0.55, 0.3], tile::BLACK, light);
+            push_box(out, m, Vec3::new(-0.15, 0.75, -1.24), Vec3::new(0.3, 0.3, 0.05), [tile::HEADLIGHT; 6], [255, 255], 3);
+            wheels(out, m, 0.6, &[-0.8, 0.0, 0.8], 0.2, light);
+        }
+        VehicleKind::Boat => {
+            vbox(out, m, [-0.6, 0.0, -1.2], [1.2, 0.12, 2.4], tile::PLANKS, light);
+            for (min, size) in [([-0.6, 0.12, -1.2], [0.1, 0.4, 2.4]), ([0.5, 0.12, -1.2], [0.1, 0.4, 2.4]), ([-0.6, 0.12, -1.2], [1.2, 0.4, 0.1]), ([-0.6, 0.12, 1.1], [1.2, 0.4, 0.1])] {
+                vbox(out, m, min, size, tile::PLANKS, light);
+            }
+            vbox(out, m, [-0.5, 0.25, -0.05], [1.0, 0.08, 0.3], tile::OAK_LOG, light);
+        }
+        VehicleKind::Car => {
+            let paint = tile::CAR_PAINT + (id % 4) as u8;
+            vbox(out, m, [-0.85, 0.25, -1.7], [1.7, 0.55, 3.4], paint, light);
+            vbox(out, m, [-0.75, 0.8, -0.85], [1.5, 0.55, 1.75], tile::WINDOW_BLUE, light);
+            vbox(out, m, [-0.78, 1.35, -0.8], [1.56, 0.08, 1.65], paint, light);
+            for x in [-0.7f32, 0.4] {
+                push_box(out, m, Vec3::new(x, 0.5, -1.73), Vec3::new(0.3, 0.15, 0.05), [tile::HEADLIGHT; 6], [255, 255], 3);
+            }
+            wheels(out, m, 0.85, &[-1.1, 1.1], 0.27, light);
+        }
+    }
+}
+
 fn entity_vertices(s: &State) -> Vec<Vertex> {
     let mut out = Vec::new();
-    for o in s.others.values() {
-        humanoid(&mut out, o.pos, o.yaw, o.pitch, o.walk, o.speed, &person(o.skin), o.held, 0.0, light_at(s, o.pos), 0);
+    let riding: HashSet<u32> = s.vehicles.values().flat_map(|v| v.state.riders.iter().map(|r| r.1)).collect();
+    for (id, o) in &s.others {
+        if riding.contains(id) {
+            humanoid_sitting(&mut out, o.pos, o.yaw, o.pitch, &person(o.skin), o.held, light_at(s, o.pos));
+        } else {
+            humanoid(&mut out, o.pos, o.yaw, o.pitch, o.walk, o.speed, &person(o.skin), o.held, 0.0, light_at(s, o.pos), 0);
+        }
     }
     if s.view != View::First {
-        let speed = s.body.vel.with_y(0.0).length();
-        let walk = s.t as f32 * speed * 2.2;
         let held = s.held_item().map_or(0, |h| h.id);
-        humanoid(&mut out, s.body.pos, s.yaw, s.pitch, walk, speed, &person(s.skin), held, s.swing, light_at(s, s.body.pos), 0);
+        if s.riding.is_some() {
+            humanoid_sitting(&mut out, s.body.pos, s.yaw, s.pitch, &person(s.skin), held, light_at(s, s.body.pos));
+        } else {
+            let speed = s.body.vel.with_y(0.0).length();
+            let walk = s.t as f32 * speed * 2.2;
+            humanoid(&mut out, s.body.pos, s.yaw, s.pitch, walk, speed, &person(s.skin), held, s.swing, light_at(s, s.body.pos), 0);
+        }
+    }
+    for (id, v) in &s.vehicles {
+        let light = light_at(s, v.pos);
+        vehicle_model(&mut out, v.state.kind, v.pos, v.yaw, *id, false, light);
+        for c in &v.state.cars {
+            vehicle_model(&mut out, v.state.kind, Vec3::new(c[0], c[1], c[2]), c[3], *id, true, light);
+        }
     }
     for (id, it) in &s.items {
         item(&mut out, it.pos, it.item, s.t, *id, light_at(s, it.pos));

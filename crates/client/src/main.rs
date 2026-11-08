@@ -48,6 +48,9 @@ fn play_and_wait(s: &mut State, travel: Option<(f32, f32, f32)>, yaw: f32, pitch
     s.sound_on = false;
     s.capture_enabled = false;
     s.world_name = rune::TextEdit::new("snapshot-world");
+    if let Some(home) = std::env::var_os("HOME") {
+        let _ = std::fs::remove_dir_all(std::path::Path::new(&home).join(".runecraft/worlds/snapshot-world"));
+    }
     s.seed_text = rune::TextEdit::new(std::env::var("RUNECRAFT_SEED").unwrap_or_else(|_| "2026".into()));
     s.host(false);
     let start = Instant::now();
@@ -189,6 +192,20 @@ fn flat_site(s: &State, n: i32) -> Option<(i32, i32, i32)> {
 fn house_scene(s: &mut State) {
     play_and_wait(s, None, 0.6, -0.15, 0.3);
     s.mode = game::Mode::Creative;
+    if flat_site(s, 7).is_none() {
+        // Deep in a forest: clear a glade beside you first.
+        let c = s.body.pos.floor().as_ivec3();
+        for i in -6..12 {
+            for j in -16..10 {
+                let (g, _) = ground_at(s, c.x + i, c.z + j);
+                let g = g.min(c.y + 3);
+                for y in (g + 1)..(c.y + 14) {
+                    s.send(runecraft_common::protocol::ToServer::SetBlock { pos: [c.x + i, y, c.z + j], block: block::AIR });
+                }
+            }
+        }
+        run_for(s, 2.0);
+    }
     let Some((x0, h, z0)) = flat_site(s, 7) else {
         eprintln!("house: no flat spot near spawn");
         return;
@@ -308,6 +325,169 @@ fn house_scene(s: &mut State) {
     s.view_proj = s.camera();
 }
 
+/// Keeps the game running for `secs` real seconds.
+fn run_for(s: &mut State, secs: f32) {
+    let start = Instant::now();
+    let mut t = s.t;
+    while start.elapsed().as_secs_f32() < secs {
+        t += 0.05;
+        s.update(t);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    s.view_proj = s.camera();
+}
+
+/// Waits until `done` or the time runs out, then until the terrain is meshed.
+fn wait_until(s: &mut State, secs: f32, done: impl Fn(&State) -> bool) {
+    let start = Instant::now();
+    let mut t = s.t;
+    let mut settled = 0;
+    while start.elapsed().as_secs_f32() < secs {
+        t += 0.05;
+        s.update(t);
+        let feet = s.body.pos.floor().as_ivec3();
+        let ready = done(s) && s.world.loaded(feet.x, feet.z) && s.world.columns.len() > 150 && s.world.pending() == 0;
+        settled = if ready { settled + 1 } else { 0 };
+        if settled > 10 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    s.chat.clear();
+    s.view_proj = s.camera();
+}
+
+fn village_spot(s: &State) -> Option<runecraft_common::village::Village> {
+    runecraft_common::worldgen::find_village(s.seed, 0, 0)
+}
+
+/// Visits the nearest village and looks over its market square.
+fn village_scene(s: &mut State) {
+    play_and_wait(s, None, 0.6, -0.15, 0.3);
+    let Some(v) = village_spot(s) else { return };
+    let eye = glam::Vec3::new(v.x as f32 - 16.5, v.ground as f32 + 12.0, v.z as f32 + 20.5);
+    s.travel(eye);
+    wait_until(s, 60.0, |s| (s.body.pos.x - v.x as f32).abs() < 40.0);
+    s.flying = true;
+    s.mode = game::Mode::Creative;
+    s.body = runecraft_common::physics::Body::new(eye);
+    aim(s, glam::Vec3::new(v.x as f32 + 2.0, v.ground as f32 + 1.0, v.z as f32 - 2.0));
+    run_for(s, 2.0);
+}
+
+/// Goes through to another realm with the realm command.
+fn realm_scene(s: &mut State, realm: &str, dim: u8, yaw: f32, pitch: f32) {
+    play_and_wait(s, None, yaw, pitch, 0.3);
+    s.send(runecraft_common::protocol::ToServer::Chat(format!("/realm {realm}")));
+    wait_until(s, 60.0, |s| s.dim == dim);
+    // Step out of the arrival portal onto its platform and look away from it.
+    s.flying = true;
+    s.mode = game::Mode::Creative;
+    let lift = if dim == 2 { glam::Vec3::new(0.0, 14.0, 16.0) } else { glam::Vec3::new(0.0, 1.5, 2.6) };
+    s.body = runecraft_common::physics::Body::new(s.body.pos + lift);
+    s.yaw = yaw;
+    s.pitch = pitch;
+    run_for(s, 2.0);
+}
+
+/// Lays a loop of track and a train on a flat spot, gets in and drives.
+fn train_scene(s: &mut State) {
+    play_and_wait(s, None, 0.6, -0.15, 0.3);
+    s.mode = game::Mode::Creative;
+    let c = s.body.pos.floor().as_ivec3();
+    let (x0, z0) = (c.x, c.z + 3);
+    let h = ground_at(s, x0, z0).0;
+    use runecraft_common::protocol::{ToServer, VehicleKind};
+    let y = h + 1;
+    // A long straight on an embankment, with the trees cleared away.
+    for i in -30..30 {
+        for dz in -3..=3 {
+            s.send(ToServer::SetBlock { pos: [x0 + i, h, z0 + dz], block: if dz.abs() <= 1 { block::COBBLE } else { block::GRASS } });
+            for dy in 1..12 {
+                s.send(ToServer::SetBlock { pos: [x0 + i, h + dy, z0 + dz], block: block::AIR });
+            }
+        }
+        let b = if i % 8 == 0 { block::POWERED_RAIL_EW_ON } else { block::RAIL_EW };
+        s.send(ToServer::SetBlock { pos: [x0 + i, y, z0], block: b });
+        if i % 8 == 0 {
+            s.send(ToServer::SetBlock { pos: [x0 + i, y, z0 + 1], block: block::REDSTONE_BLOCK });
+        }
+    }
+    run_for(s, 1.5);
+    s.send(ToServer::PlaceVehicle { kind: VehicleKind::Train, pos: [x0 as f32 + 0.5, y as f32 + 0.07, z0 as f32 + 0.5], yaw: std::f32::consts::FRAC_PI_2 });
+    run_for(s, 1.0);
+    if let Some(id) = s.vehicles.keys().next().copied() {
+        s.send(ToServer::Mount { id, seat: 0 });
+    }
+    run_for(s, 1.0);
+    s.held.insert("w".into());
+    run_for(s, 1.6);
+    s.held.remove("w");
+    s.view = game::View::Back;
+    s.yaw = 0.35;
+    s.pitch = -0.4;
+    run_for(s, 0.3);
+}
+
+/// A redstone circuit: a lever lights a row of lamps, opens a door and an inverter turns a
+/// torch off.
+fn redstone_scene(s: &mut State) {
+    play_and_wait(s, None, 0.6, -0.15, 0.3);
+    s.mode = game::Mode::Creative;
+    let c = s.body.pos.floor().as_ivec3();
+    let (x0, z0) = (c.x - 4, c.z + 8);
+    let h = ground_at(s, x0, z0).0;
+    use runecraft_common::protocol::ToServer;
+    let y = h + 1;
+    let set = |s: &mut State, x: i32, y: i32, z: i32, b: u8| s.send(ToServer::SetBlock { pos: [x, y, z], block: b });
+    for i in -8..18 {
+        for j in -12..6 {
+            set(s, x0 + i, h, z0 + j, if (-2..12).contains(&i) && (-3..4).contains(&j) { block::STONE_BRICK } else { block::GRASS });
+            for dy in 1..14 {
+                set(s, x0 + i, h + dy, z0 + j, block::AIR);
+            }
+        }
+    }
+    set(s, x0, y, z0, block::LEVER);
+    for i in 1..10 {
+        set(s, x0 + i, y, z0, block::WIRE);
+    }
+    for i in [3, 6, 9] {
+        set(s, x0 + i, y, z0 - 1, block::LAMP);
+        set(s, x0 + i, y, z0 + 1, block::LAMP);
+    }
+    set(s, x0 + 10, y, z0, block::door(false, false, 1));
+    set(s, x0 + 10, y + 1, z0, block::door(true, false, 1));
+    set(s, x0 + 5, y, z0 + 2, block::STONE);
+    set(s, x0 + 5, y + 1, z0 + 2, block::RTORCH);
+    set(s, x0 + 5, y, z0 + 1, block::WIRE);
+    run_for(s, 1.5);
+    set(s, x0, y, z0, block::LEVER_ON);
+    s.flying = true;
+    s.body = runecraft_common::physics::Body::new(glam::Vec3::new(x0 as f32 + 4.5, y as f32 + 3.5, z0 as f32 - 6.5));
+    aim(s, glam::Vec3::new(x0 as f32 + 5.0, y as f32, z0 as f32 + 0.5));
+    s.time_of_day = 0.78;
+    run_for(s, 2.0);
+}
+
+/// Cars and a boat in New York.
+fn cars_scene(s: &mut State) {
+    use runecraft_common::protocol::{ToServer, VehicleKind};
+    play_and_wait(s, Some(city(0)), 0.0, 0.1, 0.32);
+    let p = s.body.pos;
+    for (i, dz) in [-6.0f32, -12.0, -18.0, -26.0].into_iter().enumerate() {
+        let x = p.x + if i % 2 == 0 { -5.0 } else { -9.0 };
+        s.send(ToServer::PlaceVehicle { kind: VehicleKind::Car, pos: [x, p.y, p.z + dz], yaw: if i % 2 == 0 { 0.0 } else { std::f32::consts::PI } });
+    }
+    run_for(s, 1.0);
+    s.yaw = -0.1;
+    s.pitch = -0.32;
+    s.body = runecraft_common::physics::Body::new(p + glam::Vec3::new(-7.0, 4.0, 6.0));
+    s.flying = true;
+    s.mode = game::Mode::Creative;
+    run_for(s, 1.0);
+}
+
 fn city(i: usize) -> (f32, f32, f32) {
     runecraft_common::city::CITIES[i].arrival()
 }
@@ -352,6 +532,18 @@ fn main() {
             ("rome", |s| play_and_wait(s, Some(city(7)), 0.0, 0.15, 0.3)),
             ("night", |s| play_and_wait(s, Some(city(1)), 3.6, 0.3, 0.9)),
             ("friends", friend_scene),
+            ("village", village_scene),
+            ("trade", |s| {
+                village_scene(s);
+                s.give(block::Stack::new(block::EMERALD, 14));
+                s.give(block::Stack::new(block::WHEAT, 40));
+                s.panel = game::Panel::Trade;
+            }),
+            ("ember", |s| realm_scene(s, "ember", 1, 2.6, -0.15)),
+            ("sky", |s| realm_scene(s, "sky", 2, 2.6, -0.2)),
+            ("train", train_scene),
+            ("redstone", redstone_scene),
+            ("cars", cars_scene),
             ("house", house_scene),
             ("at", |s| {
                 // RUNECRAFT_AT="x,y,z,yaw,pitch[,time]": a camera anywhere, for screenshots.

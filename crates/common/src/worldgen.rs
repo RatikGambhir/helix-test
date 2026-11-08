@@ -5,6 +5,9 @@ use crate::block::*;
 use crate::chunk::{CHUNK, Column, HEIGHT, SEA_LEVEL};
 use crate::city::{self, Zone};
 use crate::noise::{fbm2, hash2, hash3, perlin3, unit};
+use crate::osm::Place;
+use crate::village::{self, Village};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Biome {
@@ -81,11 +84,64 @@ fn natural(seed: u64, x: i32, z: i32) -> (i32, Biome) {
     (h, biome)
 }
 
+/// Natural land suitable for a village: its height, and whether it's desert.
+fn village_land(seed: u64, x: i32, z: i32) -> Option<(i32, bool)> {
+    if !matches!(city::zone(x, z), Zone::None) {
+        return None;
+    }
+    let (h, b) = natural(seed, x, z);
+    let ok = matches!(b, Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::Desert | Biome::Cherry) && (SEA_LEVEL + 2..110).contains(&h);
+    ok.then_some((h, b == Biome::Desert))
+}
+
+/// The village whose grounds reach (x, z), if any.
+pub fn village_at(seed: u64, x: i32, z: i32) -> Option<Village> {
+    // Villages stay well away from spawn so the start of the game is natural land.
+    if x.abs() < 300 && z.abs() < 300 {
+        return None;
+    }
+    village::near(seed, x, z, &|x, z| village_land(seed, x, z))
+}
+
+/// The village nearest to (x, z), searching outward cell by cell.
+pub fn find_village(seed: u64, x: i32, z: i32) -> Option<Village> {
+    let (gx, gz) = (x.div_euclid(village::CELL), z.div_euclid(village::CELL));
+    for r in 0i32..12 {
+        let mut best: Option<(i64, Village)> = None;
+        for dz in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dz.abs() != r {
+                    continue;
+                }
+                if let Some(v) = village::in_cell(seed, gx + dx, gz + dz, &|x, z| village_land(seed, x, z))
+                    && village_at(seed, v.x, v.z).is_some()
+                {
+                    let d = ((v.x - x) as i64).pow(2) + ((v.z - z) as i64).pow(2);
+                    if best.is_none_or(|b| d < b.0) {
+                        best = Some((d, v));
+                    }
+                }
+            }
+        }
+        if let Some((_, v)) = best {
+            return Some(v);
+        }
+    }
+    None
+}
+
 pub fn sample(seed: u64, x: i32, z: i32) -> Sample {
     let zone = city::zone(x, z);
     let (h, b) = natural(seed, x, z);
     match zone {
-        Zone::None => Sample { height: h, biome: b, zone },
+        Zone::None => match village_at(seed, x, z) {
+            Some(v) => {
+                let w = v.weight(x, z);
+                let height = (v.ground as f32 * w + h as f32 * (1.0 - w)).round() as i32;
+                Sample { height, biome: if v.desert { Biome::Desert } else if w > 0.5 { Biome::Plains } else { b }, zone }
+            }
+            None => Sample { height: h, biome: b, zone },
+        },
         Zone::Core(_) => Sample { height: city::GROUND, biome: Biome::City, zone },
         Zone::River(_) => Sample { height: SEA_LEVEL - 6, biome: Biome::Ocean, zone },
         Zone::Blend(_, t) => {
@@ -141,8 +197,16 @@ pub fn generate(seed: u64, cx: i32, cz: i32) -> Column {
             if let Zone::Core(c) | Zone::River(c) = s.zone {
                 city::fill_column(seed, c, x, z, &mut |y, b| col.set_raw(lx, y, lz, b));
             }
-            if let Zone::None | Zone::Blend(_, _) = s.zone {
-                plants(seed, &mut col, lx, lz, x, z, &s);
+            let village = if matches!(s.zone, Zone::None) { village_at(seed, x, z) } else { None };
+            match village {
+                Some(v) if v.claims(x, z) => {
+                    v.fill_column(x, z, &mut |y, b| col.set_raw(lx, y, lz, b));
+                }
+                _ => {
+                    if let Zone::None | Zone::Blend(_, _) = s.zone {
+                        plants(seed, &mut col, lx, lz, x, z, &s);
+                    }
+                }
             }
         }
     }
@@ -252,7 +316,7 @@ fn tree_in_cell(seed: u64, gx: i32, gz: i32) -> Option<Tree> {
     let x = gx * TREE_CELL + (hsh % TREE_CELL as u64) as i32;
     let z = gz * TREE_CELL + ((hsh >> 8) % TREE_CELL as u64) as i32;
     let s = sample(seed, x, z);
-    if !matches!(s.zone, Zone::None) {
+    if !matches!(s.zone, Zone::None) || village_at(seed, x, z).is_some_and(|v| v.claims(x, z) || v.claims(x + 3, z + 3) || v.claims(x - 3, z - 3)) {
         return None;
     }
     let density = match s.biome {
@@ -362,6 +426,156 @@ fn trees(seed: u64, col: &mut Column, cx: i32, cz: i32) {
     }
 }
 
+/// Generates a column in any dimension: 0 the overworld (with any real places loaded into
+/// it), 1 the Ember realm, 2 the Sky realm.
+pub fn generate_in(seed: u64, dim: u8, cx: i32, cz: i32, places: &[Arc<Place>]) -> Column {
+    match dim {
+        1 => ember(seed, cx, cz),
+        2 => sky(seed, cx, cz),
+        _ => {
+            let mut col = generate(seed, cx, cz);
+            for p in places.iter().filter(|p| p.touches_chunk(cx, cz)) {
+                for lz in 0..CHUNK {
+                    for lx in 0..CHUNK {
+                        let (x, z) = (cx * CHUNK + lx, cz * CHUNK + lz);
+                        if p.near(x, z) {
+                            let natural = sample(seed, x, z).height;
+                            p.fill_column(seed, x, z, natural, &mut |y, b| col.set_raw(lx, y, lz, b));
+                        }
+                    }
+                }
+                col.recompute_heights();
+            }
+            col
+        }
+    }
+}
+
+/// Lava sea level in the Ember realm.
+pub const EMBER_LAVA: i32 = 31;
+/// The Ember realm's bedrock roof.
+pub const EMBER_ROOF: i32 = 127;
+
+fn ember_solid(seed: u64, x: i32, y: i32, z: i32) -> bool {
+    let (fx, fy, fz) = (x as f32, y as f32, z as f32);
+    let mut d = perlin3(seed ^ 0xE3B, fx / 44.0, fy / 26.0, fz / 44.0) + perlin3(seed ^ 0xE3C, fx / 13.0, fy / 11.0, fz / 13.0) * 0.35;
+    // Solid floors and ceilings, open caverns in between.
+    d += ((26 - y).max(0) as f32 / 14.0).powi(2) + ((y - 104).max(0) as f32 / 18.0).powi(2);
+    d > 0.12
+}
+
+/// The Ember realm: a hot cavern world of emberstone over a lava sea, under a bedrock roof.
+pub fn ember(seed: u64, cx: i32, cz: i32) -> Column {
+    let mut col = Column::default();
+    for lz in 0..CHUNK {
+        for lx in 0..CHUNK {
+            let (x, z) = (cx * CHUNK + lx, cz * CHUNK + lz);
+            let mut above_solid = true;
+            for y in (0..=EMBER_ROOF).rev() {
+                let r = unit(hash3(seed ^ 0xE31, x, y, z));
+                let b = if y == 0 || y == EMBER_ROOF || (y < 4 && r < 0.5) || (y > EMBER_ROOF - 4 && r < 0.5) {
+                    BEDROCK
+                } else if ember_solid(seed, x, y, z) {
+                    let top = !ember_solid(seed, x, y + 1, z);
+                    if r < 0.012 {
+                        QUARTZ_ORE
+                    } else if top && y > EMBER_LAVA && perlin3(seed ^ 0xA54, x as f32 / 20.0, 0.0, z as f32 / 20.0) > 0.25 {
+                        ASH_SAND
+                    } else if !above_solid && y > 70 && unit(hash3(seed ^ 0x6105, x >> 2, y >> 2, z >> 2)) < 0.08 {
+                        GLOWSTONE
+                    } else {
+                        EMBERSTONE
+                    }
+                } else if y <= EMBER_LAVA {
+                    LAVA
+                } else {
+                    AIR
+                };
+                // Glowstone hangs under ceilings: mark when the block above is open.
+                above_solid = is_solid(b) || b == BEDROCK;
+                col.set_raw(lx, y, lz, b);
+            }
+        }
+    }
+    col.recompute_heights();
+    col
+}
+
+fn sky_density(seed: u64, x: i32, y: i32, z: i32) -> f32 {
+    let (fx, fy, fz) = (x as f32, y as f32, z as f32);
+    let big = perlin3(seed ^ 0x5C1, fx / 70.0, fy / 40.0, fz / 70.0);
+    let small = perlin3(seed ^ 0x5C2, fx / 22.0, fy / 16.0, fz / 22.0) * 0.4;
+    // Islands gather around height 80 and thin out above and below; their bottoms taper.
+    let dy = (y - 82) as f32;
+    let fall = if dy < 0.0 { (dy / 26.0).powi(2) } else { (dy / 12.0).powi(2) };
+    big + small - fall
+}
+
+/// Island top height at a column of the Sky realm, if there is land there.
+fn sky_top(seed: u64, x: i32, z: i32) -> Option<i32> {
+    (50..110).rev().find(|&y| sky_density(seed, x, y, z) > 0.28)
+}
+
+/// The Sky realm: floating islands of cloudstone and grass in an endless sky.
+pub fn sky(seed: u64, cx: i32, cz: i32) -> Column {
+    let mut col = Column::default();
+    for lz in 0..CHUNK {
+        for lx in 0..CHUNK {
+            let (x, z) = (cx * CHUNK + lx, cz * CHUNK + lz);
+            let mut depth = 0;
+            for y in (40..112).rev() {
+                if sky_density(seed, x, y, z) > 0.28 {
+                    let r = unit(hash3(seed ^ 0x5C3, x, y, z));
+                    let b = match depth {
+                        0 => GRASS,
+                        1..=2 => DIRT,
+                        _ if r < 0.01 => GOLD_ORE,
+                        _ if r < 0.016 => EMERALD_ORE,
+                        _ => CLOUDSTONE,
+                    };
+                    col.set_raw(lx, y, lz, b);
+                    if depth == 0 && y < 111 {
+                        let f = unit(hash2(seed ^ 0x5C4, x, z));
+                        if f < 0.08 {
+                            col.set_raw(lx, y + 1, lz, TALL_GRASS);
+                        } else if f < 0.1 {
+                            col.set_raw(lx, y + 1, lz, FLOWER_YELLOW);
+                        }
+                    }
+                    depth += 1;
+                } else {
+                    depth = 0;
+                }
+            }
+        }
+    }
+    // Trees on the islands.
+    let (x0, z0) = (cx * CHUNK, cz * CHUNK);
+    for gz in (z0 - 4).div_euclid(7)..=(z0 + CHUNK + 4).div_euclid(7) {
+        for gx in (x0 - 4).div_euclid(7)..=(x0 + CHUNK + 4).div_euclid(7) {
+            let h = hash2(seed ^ 0x5C5, gx, gz);
+            if unit(h) > 0.35 {
+                continue;
+            }
+            let (x, z) = (gx * 7 + (h >> 8) as i32 % 7, gz * 7 + (h >> 16) as i32 % 7);
+            let Some(y) = sky_top(seed, x, z) else { continue };
+            let kind = if (h >> 24) % 3 == 0 { TreeKind::Cherry } else { TreeKind::Oak };
+            let t = Tree { x, y, z, kind, height: 4 + ((h >> 28) % 3) as i32 };
+            tree_blocks(seed, &t, &mut |x, y, z, b, force| {
+                let (lx, lz) = (x - x0, z - z0);
+                if (0..CHUNK).contains(&lx) && (0..CHUNK).contains(&lz) && (0..HEIGHT).contains(&y) {
+                    let cur = col.get(lx, y, lz);
+                    if (force && b != DIRT) || cur == AIR || cur == TALL_GRASS {
+                        col.set_raw(lx, y, lz, b);
+                    }
+                }
+            });
+        }
+    }
+    col.recompute_heights();
+    col
+}
+
 /// Where a player should stand at a column: the first air above the ground.
 pub fn spawn_height(seed: u64, x: i32, z: i32) -> i32 {
     let col = generate(seed, x.div_euclid(CHUNK), z.div_euclid(CHUNK));
@@ -417,6 +631,36 @@ mod tests {
         assert!(spawn_height(42, 0, 0) > SEA_LEVEL);
         let s = find_spawn(42);
         assert!(s[1] > SEA_LEVEL as f32);
+    }
+
+    #[test]
+    fn the_realms_generate() {
+        let e = ember(3, 0, 0);
+        assert_eq!(e.get(0, 0, 0), BEDROCK);
+        assert_eq!(e.get(0, EMBER_ROOF, 0), BEDROCK);
+        assert!(e.blocks.iter().any(|&b| b == EMBERSTONE));
+        let mut land = 0;
+        for c in 0..6 {
+            let s = sky(3, c * 3, c);
+            land += s.blocks.iter().filter(|&&b| b == CLOUDSTONE || b == GRASS).count();
+            assert!(s.blocks.iter().take(16 * 16 * 30).all(|&b| b == AIR), "nothing below the islands");
+        }
+        assert!(land > 1000, "some islands");
+    }
+
+    #[test]
+    fn a_village_stands_on_level_ground() {
+        let seed = 9;
+        let v = (0..40)
+            .flat_map(|gx| (0..4).map(move |gz| (gx, gz)))
+            .find_map(|(gx, gz)| village::in_cell(seed, gx, gz, &|x, z| village_land(seed, x, z)))
+            .expect("a village somewhere");
+        let col = generate(seed, v.x.div_euclid(16), v.z.div_euclid(16));
+        let (lx, lz) = (v.x.rem_euclid(16), v.z.rem_euclid(16));
+        assert_eq!(col.get(lx, v.ground, lz), WATER, "the well is in the middle");
+        let (sx, sz) = (v.x + 4, v.z + 4);
+        let sq = generate(seed, sx.div_euclid(16), sz.div_euclid(16));
+        assert_eq!(sq.get(sx.rem_euclid(16), v.ground, sz.rem_euclid(16)), COBBLE, "on a cobbled square");
     }
 
     #[test]

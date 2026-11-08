@@ -20,7 +20,7 @@ impl World {
         }
         let id = self.next_item;
         self.next_item += 1;
-        self.items.insert(id, Item { stack, pos: pos - Vec3::Y * 0.1, vel, age: 0.0, pickup_delay: delay });
+        self.lv.items.insert(id, Item { stack, pos: pos - Vec3::Y * 0.1, vel, age: 0.0, pickup_delay: delay });
     }
 
     fn point_solid(&self, p: Vec3) -> bool {
@@ -54,10 +54,10 @@ impl World {
 
     pub(crate) fn tick_items(&mut self, dt: f32) {
         let players: Vec<(u32, Vec3)> = self.players.iter().map(|(id, p)| (*id, p.pos())).collect();
-        let ids: Vec<u32> = self.items.keys().copied().collect();
+        let ids: Vec<u32> = self.lv.items.keys().copied().collect();
         let mut gone = Vec::new();
         for id in ids {
-            let Some(mut it) = self.items.remove(&id) else { continue };
+            let Some(mut it) = self.lv.items.remove(&id) else { continue };
             it.age += dt;
             it.pickup_delay -= dt;
             let loaded = self.loaded(it.pos.x.floor() as i32, it.pos.z.floor() as i32);
@@ -77,10 +77,10 @@ impl World {
                 gone.push(id);
                 continue;
             }
-            self.items.insert(id, it);
+            self.lv.items.insert(id, it);
         }
         for id in gone {
-            self.items.remove(&id);
+            self.lv.items.remove(&id);
         }
         self.merge_clock += dt;
         if self.merge_clock > 1.0 {
@@ -89,14 +89,14 @@ impl World {
         }
         for p in self.players.values() {
             let at = p.pos();
-            let list: Vec<ItemState> = self.items.iter().filter(|(_, it)| it.pos.distance(at) < 80.0).map(|(id, it)| ItemState { id: *id, item: it.stack.id, pos: it.pos.to_array() }).collect();
+            let list: Vec<ItemState> = self.lv.items.iter().filter(|(_, it)| it.pos.distance(at) < 80.0).map(|(id, it)| ItemState { id: *id, item: it.stack.id, pos: it.pos.to_array() }).collect();
             p.send(&ToClient::Items(list));
         }
     }
 
     /// Stacks of the same thing lying together become one.
     fn merge_items(&mut self) {
-        let all: Vec<(u32, Vec3, Stack)> = self.items.iter().map(|(id, it)| (*id, it.pos, it.stack)).collect();
+        let all: Vec<(u32, Vec3, Stack)> = self.lv.items.iter().map(|(id, it)| (*id, it.pos, it.stack)).collect();
         let mut removed = std::collections::HashSet::new();
         for (i, (a, pa, sa)) in all.iter().enumerate() {
             if removed.contains(a) {
@@ -106,18 +106,18 @@ impl World {
                 if removed.contains(b) || !sa.same(sb) || pa.distance(*pb) > 1.2 {
                     continue;
                 }
-                let total = self.items[a].stack.n as u32 + sb.n as u32;
+                let total = self.lv.items[a].stack.n as u32 + sb.n as u32;
                 if total > block::max_stack(sa.id) as u32 {
                     continue;
                 }
-                if let Some(it) = self.items.get_mut(a) {
+                if let Some(it) = self.lv.items.get_mut(a) {
                     it.stack.n = total as u8;
                 }
                 removed.insert(*b);
             }
         }
         for id in removed {
-            self.items.remove(&id);
+            self.lv.items.remove(&id);
         }
     }
 }

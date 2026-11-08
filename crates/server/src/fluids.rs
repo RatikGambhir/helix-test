@@ -22,28 +22,28 @@ impl World {
         for d in ALL.iter().chain(std::iter::once(&[0, 0, 0])) {
             let q = add(p, *d);
             if block::fluid(self.get(q[0], q[1], q[2])).is_some() {
-                self.fluid_active.insert(q);
+                self.lv.fluid_active.insert(q);
             }
         }
     }
 
     pub(crate) fn tick_fluids(&mut self, dt: f32) {
-        self.fluid_clock.0 += dt;
-        self.fluid_clock.1 += dt;
-        let water = self.fluid_clock.0 >= 0.25;
-        let lava = self.fluid_clock.1 >= 1.0;
+        self.lv.fluid_clock.0 += dt;
+        self.lv.fluid_clock.1 += dt;
+        let water = self.lv.fluid_clock.0 >= 0.25;
+        let lava = self.lv.fluid_clock.1 >= 1.0;
         if water {
-            self.fluid_clock.0 = 0.0;
+            self.lv.fluid_clock.0 = 0.0;
         }
         if lava {
-            self.fluid_clock.1 = 0.0;
+            self.lv.fluid_clock.1 = 0.0;
         }
         if !water && !lava {
             return;
         }
         let mut due = Vec::new();
         let mut keep = std::collections::HashSet::new();
-        let active: Vec<[i32; 3]> = self.fluid_active.drain().collect();
+        let active: Vec<[i32; 3]> = self.lv.fluid_active.drain().collect();
         for p in active {
             let kind = block::fluid(self.get_raw(p)).map(|f| f.0);
             match kind {
@@ -55,7 +55,7 @@ impl World {
                 None => {}
             }
         }
-        self.fluid_active = keep;
+        self.lv.fluid_active = keep;
         for p in due {
             self.update_fluid(p);
         }
@@ -79,7 +79,7 @@ impl World {
             for d in ALL {
                 let q = add(p, d);
                 if block::fluid(self.get_raw(q)).is_some_and(|f| f.0 == 1) {
-                    self.fluid_active.insert(q);
+                    self.lv.fluid_active.insert(q);
                 }
             }
         }

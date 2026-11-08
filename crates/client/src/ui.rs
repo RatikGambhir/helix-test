@@ -7,7 +7,7 @@ use rune::{Color, Cx, El, Key, KeyEvent, Phase, PointerPress, ScrollSpec, Tx, Wh
 use runecraft_common::block::{self, BlockId, Stack};
 use runecraft_common::city::CITIES;
 use runecraft_common::craft::RECIPES;
-use runecraft_common::protocol::ContainerKind;
+use runecraft_common::protocol::{ContainerKind, ToServer};
 
 fn srgb(v: f32) -> f32 {
     if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
@@ -248,7 +248,8 @@ pub fn on_key(s: &mut State, e: &KeyEvent, tx: &mut Tx) -> bool {
         Screen::Playing => {
             let name = key_name(e);
             if s.panel != Panel::None {
-                let toggle = matches!((s.panel, name.as_deref()), (Panel::Inventory | Panel::Crafting | Panel::Container, Some("e")) | (Panel::Map, Some("m")));
+                let typing = s.place_edit.focused && s.panel == Panel::Map;
+                let toggle = !typing && matches!((s.panel, name.as_deref()), (Panel::Inventory | Panel::Crafting | Panel::Container | Panel::Trade, Some("e")) | (Panel::Map, Some("m")));
                 if (e.key == Key::Escape || toggle) && !matches!(s.panel, Panel::Dead | Panel::Sleeping) {
                     if matches!(s.panel, Panel::Settings | Panel::Help) {
                         s.panel = Panel::Pause;
@@ -467,6 +468,7 @@ fn game(s: &State, cx: &mut Cx<State>) -> El {
         Panel::Dead => Some(dead(s)),
         Panel::Help => Some(help()),
         Panel::Sleeping => Some(sleeping()),
+        Panel::Trade => Some(trade(s)),
     };
     if s.panel == Panel::Chat {
         root = root.child(chat_panel(s));
@@ -496,7 +498,9 @@ fn modal(content: El) -> El {
 
 fn top_bar(s: &State) -> El {
     let mut left = col().gap(4.0);
-    if let Some((name, dist, dir)) = s.nearest_city() {
+    if s.dim == 0
+        && let Some((name, dist, dir)) = s.nearest_city()
+    {
         let d = if dist > 1000.0 { format!("{:.1} km", dist / 1000.0) } else { format!("{} m", dist as i32) };
         let txt = if dist < 300.0 { format!("You are in {name}") } else { format!("{name} · {d} {dir}  (M for the map)") };
         left = left.child(el().px(10.0).py(5.0).radius(6.0).fill(rgba(0x000000, 0.4)).child(label(txt, SMALL, white())));
@@ -852,12 +856,13 @@ fn controls_lines() -> Vec<(&'static str, &'static str)> {
         ("W A S D", "Walk (Ctrl to sprint, Shift to sneak)"),
         ("Mouse", "Look around (click to grab, Esc to let go)"),
         ("Left click", "Mine (hold)"),
-        ("Right click", "Place; use doors, beds, chests, tables; eat"),
+        ("Right click", "Place; use doors, levers, chests, tables, trading posts; eat; get in vehicles"),
+        ("In a vehicle", "W/S drive or brake, A/D steer, Shift to get out"),
         ("Space", "Jump, swim up, climb · double-tap to fly"),
         ("1–9, wheel", "Choose hotbar slot"),
         ("E", "Inventory and crafting"),
         ("Q", "Drop item (Ctrl+Q: whole stack)"),
-        ("M", "Map: travel to the cities"),
+        ("M", "Map: cities and real places"),
         ("T, /", "Chat and commands"),
         ("F5", "First / third person"),
         ("N", "Minimap"),
@@ -871,7 +876,7 @@ fn help() -> El {
     for (k, v) in controls_lines() {
         rows.push(row().gap(12.0).child(label(k, LABEL, rgba(0xffe08a, 1.0)).w(120.0)).child(label(v, BODY, white())));
     }
-    rows.push(label("Commands: /tp tokyo · /tp chicago · /time day · /weather rain · /give diamond 5 · /gamemode creative", SMALL, rgba(0xb8c0cc, 1.0)).wrap().w(480.0));
+    rows.push(label("Commands: /tp tokyo · /time day · /weather rain · /give diamond 5 · /gamemode creative · /place Eiffel Tower · /realm ember", SMALL, rgba(0xb8c0cc, 1.0)).wrap().w(480.0));
     rows.push(button("back", "Back", true, |s| s.panel = Panel::Pause));
     card(rows).w(520.0)
 }
@@ -901,13 +906,81 @@ fn map_panel(s: &State) -> El {
         let p = s.spawn;
         s.travel(p);
     }));
+    // Real places from OpenStreetMap.
+    let mut places = col().gap(6.0).child(label("Real places (OpenStreetMap)", LABEL, white())).child(
+        label("Type any place on Earth: it's downloaded and built 1 block = 1 metre.", SMALL, rgba(0x9aa3b0, 1.0)).wrap().w(280.0),
+    );
+    places = places.child(
+        row().gap(6.0)
+            .child(field(&s.place_edit, "place-edit", "e.g. Times Square, New York", 190.0, |s| &mut s.place_edit))
+            .child(small_button("place-go", "Build", |s| {
+                let q = s.place_edit.text.trim().to_string();
+                if !q.is_empty() {
+                    s.send(ToServer::LoadPlace(q));
+                    s.place_edit = rune::TextEdit::new("");
+                    s.close_panel();
+                }
+            })),
+    );
+    for (i, pl) in s.places.iter().enumerate() {
+        let pos = Vec3::from(pl.pos);
+        places = places.child(
+            row().gap(8.0)
+                .center_y()
+                .px(10.0)
+                .py(4.0)
+                .radius(8.0)
+                .fill(rgba(0xffffff, 0.05))
+                .child(label(pl.name.clone(), SMALL, white()).wrap().w(190.0))
+                .child(button(&format!("place{i}"), "Go", true, move |s| s.travel(pos))),
+        );
+    }
+    places = places.child(label("Map data © OpenStreetMap contributors", SMALL, rgba(0x7a8290, 1.0)));
     let map = col().gap(6.0)
         .child(el().size(384.0, 384.0).radius(8.0).clip_rounded(8.0).border(2.0, rgba(0x000000, 0.6)).pixels(&s.map))
         .child(label(format!("You: {:.0}, {:.0}, {:.0} · 512 × 512 blocks around you · north is up", p.x, p.y, p.z), SMALL, rgba(0xb8c0cc, 1.0)));
     card(vec![
         label("Map", HEAD, white()),
-        row().gap(18.0).items_start().child(map).child(col().gap(8.0).w(300.0).child(label("Travel to a city", LABEL, white())).child(cities.scroll(ScrollSpec { stick_bottom: false }).max_h(380.0))),
+        row().gap(18.0)
+            .items_start()
+            .child(map)
+            .child(col().gap(8.0).w(300.0).child(label("Travel to a city", LABEL, white())).child(cities.scroll(ScrollSpec { stick_bottom: false }).max_h(380.0)))
+            .child(places.w(290.0)),
         button("close", "Close (M)", true, |s| s.close_panel()),
+    ])
+}
+
+fn trade(s: &State) -> El {
+    let mut list = col().gap(4.0);
+    for (i, o) in runecraft_common::village::OFFERS.iter().enumerate() {
+        let ok = s.can_trade(i);
+        let mut line = row().key(format!("offer{i}"))
+            .gap(8.0)
+            .center_y()
+            .px(10.0)
+            .py(4.0)
+            .radius(6.0)
+            .fill(if ok { rgba(0x2f5a2f, 0.9) } else { rgba(0x262b35, 0.7) })
+            .child(stack_view(s, Stack::new(o.cost.0, o.cost.1), 36.0))
+            .child(label(format!("{} ×{}", block::item_name(o.cost.0), o.cost.1), SMALL, white()).w(130.0))
+            .child(label("→", LABEL, white()))
+            .child(stack_view(s, Stack::new(o.out.0, o.out.1), 36.0))
+            .child(label(format!("{} ×{}", block::item_name(o.out.0), o.out.1), SMALL, white()).w(130.0));
+        if ok {
+            line = line.hover(rgba(0x3c7a3c, 1.0)).on_press(move |s: &mut State| {
+                s.trade(i);
+            });
+        } else {
+            line = line.opacity(0.55);
+        }
+        list = list.child(line);
+    }
+    let emeralds: u32 = s.inv.iter().flatten().filter(|st| st.id == block::EMERALD).map(|st| st.n as u32).sum();
+    card(vec![
+        label("Trading post", HEAD, white()),
+        label(format!("Click an offer to trade. You have {emeralds} emeralds."), SMALL, rgba(0xb8c0cc, 1.0)),
+        list.scroll(ScrollSpec { stick_bottom: false }).max_h(420.0).w(420.0),
+        button("close", "Done (E)", true, |s| s.close_panel()),
     ])
 }
 

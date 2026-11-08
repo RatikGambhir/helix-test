@@ -72,6 +72,19 @@ pub mod tile {
     pub const SPRUCE_LOG_TOP: u8 = 74;
     pub const WINDOW_WARM: u8 = 75;
     pub const LAVA: u8 = 76;
+    pub const REDSTONE_ORE: u8 = 77;
+    pub const WIRE: u8 = 78;
+    pub const WIRE_ON: u8 = 79;
+    pub const LEVER: u8 = 80;
+    pub const BUTTON: u8 = 81;
+    pub const RTORCH: u8 = 82;
+    pub const RTORCH_OFF: u8 = 83;
+    pub const LAMP: u8 = 84;
+    pub const LAMP_ON: u8 = 85;
+    pub const REDSTONE_BLOCK: u8 = 86;
+    pub const RAIL_EW: u8 = 87;
+    pub const RAIL_CURVE: u8 = 88; // NE, NW, SE, SW: 88..=91
+    pub const POWERED_RAIL: u8 = 92; // NS, EW, NS on, EW on: 92..=95
     // Item sprites
     pub const STICK: u8 = 96;
     pub const COAL: u8 = 97;
@@ -81,6 +94,11 @@ pub mod tile {
     pub const PICK: u8 = 101; // 4 tiers: 101..=104
     pub const APPLE: u8 = 105;
     pub const BREAD: u8 = 106;
+    pub const TRADE_TOP: u8 = 107;
+    pub const TRADE_SIDE: u8 = 108;
+    pub const EMERALD_ORE: u8 = 109;
+    pub const EMERALD_BLOCK: u8 = 110;
+    pub const EMBERSTONE: u8 = 111;
     // Utility tiles
     pub const CRACK: u8 = 112; // 10 stages: 112..=121
     pub const WHITE: u8 = 122;
@@ -90,6 +108,12 @@ pub mod tile {
     pub const PANTS: u8 = 136;
     pub const FACE: u8 = 137; // 4 faces: 137..=140
     pub const HAIR: u8 = 141;
+    pub const EMBER_BRICK: u8 = 142;
+    pub const QUARTZ_ORE: u8 = 143;
+    pub const ASH_SAND: u8 = 144;
+    pub const EMBER_PORTAL: u8 = 145;
+    pub const SKY_PORTAL: u8 = 146;
+    pub const CLOUDSTONE: u8 = 147;
     pub const TORCH: u8 = 148;
     pub const DOOR_TOP: u8 = 149;
     pub const DOOR_BOTTOM: u8 = 150;
@@ -107,6 +131,16 @@ pub mod tile {
     pub const RAIL: u8 = 165;
     pub const SEEDS: u8 = 166;
     pub const WHEAT_ITEM: u8 = 167;
+    pub const EMERALD: u8 = 168;
+    pub const QUARTZ: u8 = 169;
+    pub const FLINT_STEEL: u8 = 170;
+    pub const MINECART: u8 = 171;
+    pub const TRAIN: u8 = 172;
+    pub const BOAT: u8 = 173;
+    pub const CAR: u8 = 174;
+    pub const TIRE: u8 = 175;
+    pub const CAR_PAINT: u8 = 176; // 4 colours: 176..=179
+    pub const HEADLIGHT: u8 = 180;
     pub const COPPER_INGOT: u8 = 183;
     pub const AXE: u8 = 184; // 4 tiers
     pub const SHOVEL: u8 = 188; // 4 tiers
@@ -186,10 +220,10 @@ blocks! {
     COBBLE = 11 => BlockDef { needs_pick: true, ..d("Cobblestone", same(t::COBBLE), Solid, 2.0, 11) };
     GLASS = 12 => d("Glass", same(t::GLASS), Cutout, 0.3, 0);
     BRICK = 13 => BlockDef { needs_pick: true, ..d("Bricks", same(t::BRICK), Solid, 2.0, 13) };
-    COAL_ORE = 14 => BlockDef { needs_pick: true, ..d("Coal Ore", same(t::COAL_ORE), Solid, 3.0, 129) };
+    COAL_ORE = 14 => BlockDef { needs_pick: true, ..d("Coal Ore", same(t::COAL_ORE), Solid, 3.0, COAL) };
     IRON_ORE = 15 => BlockDef { needs_pick: true, ..d("Iron Ore", same(t::IRON_ORE), Solid, 3.0, 15) };
     GOLD_ORE = 16 => BlockDef { needs_pick: true, ..d("Gold Ore", same(t::GOLD_ORE), Solid, 3.0, 16) };
-    DIAMOND_ORE = 17 => BlockDef { needs_pick: true, ..d("Diamond Ore", same(t::DIAMOND_ORE), Solid, 3.0, 132) };
+    DIAMOND_ORE = 17 => BlockDef { needs_pick: true, ..d("Diamond Ore", same(t::DIAMOND_ORE), Solid, 3.0, DIAMOND) };
     SNOW = 18 => d("Snow", same(t::SNOW), Solid, 0.3, 18);
     ICE = 19 => d("Ice", same(t::ICE), Solid, 0.5, 0);
     CACTUS = 20 => d("Cactus", [t::CACTUS_TOP, t::CACTUS_SIDE, t::CACTUS_TOP], Solid, 0.4, 20);
@@ -257,10 +291,10 @@ blocks! {
     BED = 82 => d("Bed", [t::BED_TOP, t::BED_SIDE, t::PLANKS], Shape, 0.3, 82);
     CHEST = 83 => d("Chest", [t::CHEST_TOP, t::CHEST_SIDE, t::CHEST_TOP], Shape, 2.5, 83);
     FARMLAND = 84 => d("Farmland", [t::FARMLAND, t::DIRT, t::DIRT], Shape, 0.6, 2);
-    WHEAT_0 = 85 => d("Wheat Crop", same(t::WHEAT), Plant, 0.0, 143);
-    WHEAT_1 = 86 => d("Wheat Crop", same(t::WHEAT + 1), Plant, 0.0, 143);
-    WHEAT_2 = 87 => d("Wheat Crop", same(t::WHEAT + 2), Plant, 0.0, 143);
-    WHEAT_3 = 88 => d("Wheat Crop", same(t::WHEAT + 3), Plant, 0.0, 144);
+    WHEAT_0 = 85 => d("Wheat Crop", same(t::WHEAT), Plant, 0.0, SEEDS);
+    WHEAT_1 = 86 => d("Wheat Crop", same(t::WHEAT + 1), Plant, 0.0, SEEDS);
+    WHEAT_2 = 87 => d("Wheat Crop", same(t::WHEAT + 2), Plant, 0.0, SEEDS);
+    WHEAT_3 = 88 => d("Wheat Crop", same(t::WHEAT + 3), Plant, 0.0, WHEAT);
     SAPLING = 89 => d("Sapling", same(t::SAPLING), Plant, 0.0, 89);
     COPPER_ORE = 90 => BlockDef { needs_pick: true, ..d("Copper Ore", same(t::COPPER_ORE), Solid, 3.0, 90) };
     WATER_1 = 91 => d("Flowing Water", same(t::WATER), Liquid, -1.0, 0);
@@ -275,41 +309,85 @@ blocks! {
     LAVA_3 = 100 => BlockDef { light: 15, ..d("Flowing Lava", same(t::LAVA), Liquid, -1.0, 0) };
     FURNACE_LIT = 101 => BlockDef { light: 13, needs_pick: true, ..d("Furnace", [t::FURNACE_SIDE, t::FURNACE_LIT, t::FURNACE_SIDE], Solid, 3.5, 32) };
     RAIL = 102 => d("Rail", same(t::RAIL), Shape, 0.7, 102);
+    REDSTONE_ORE = 103 => BlockDef { needs_pick: true, ..d("Redstone Ore", same(t::REDSTONE_ORE), Solid, 3.0, WIRE) };
+    WIRE = 104 => d("Redstone Dust", same(t::WIRE), Shape, 0.0, WIRE);
+    WIRE_ON = 105 => BlockDef { light: 2, ..d("Redstone Dust", same(t::WIRE_ON), Shape, 0.0, WIRE) };
+    LEVER = 106 => d("Lever", same(t::COBBLE), Shape, 0.4, LEVER);
+    LEVER_ON = 107 => d("Lever", same(t::COBBLE), Shape, 0.4, LEVER);
+    BUTTON = 108 => d("Button", same(t::STONE), Shape, 0.4, BUTTON);
+    BUTTON_ON = 109 => d("Button", same(t::STONE), Shape, 0.4, BUTTON);
+    PLATE = 110 => d("Pressure Plate", same(t::STONE), Shape, 0.4, PLATE);
+    PLATE_ON = 111 => d("Pressure Plate", same(t::STONE), Shape, 0.4, PLATE);
+    RTORCH = 112 => BlockDef { light: 7, ..d("Redstone Torch", same(t::RTORCH), Shape, 0.0, RTORCH) };
+    RTORCH_OFF = 113 => d("Redstone Torch", same(t::RTORCH_OFF), Shape, 0.0, RTORCH);
+    LAMP = 114 => d("Redstone Lamp", same(t::LAMP), Solid, 0.3, LAMP);
+    LAMP_ON = 115 => BlockDef { light: 15, ..d("Redstone Lamp", same(t::LAMP_ON), Solid, 0.3, LAMP) };
+    REDSTONE_BLOCK = 116 => BlockDef { needs_pick: true, ..d("Block of Redstone", same(t::REDSTONE_BLOCK), Solid, 2.0, REDSTONE_BLOCK) };
+    RAIL_EW = 117 => d("Rail", same(t::RAIL_EW), Shape, 0.7, RAIL);
+    RAIL_NE = 118 => d("Rail", same(t::RAIL_CURVE), Shape, 0.7, RAIL);
+    RAIL_NW = 119 => d("Rail", same(t::RAIL_CURVE + 1), Shape, 0.7, RAIL);
+    RAIL_SE = 120 => d("Rail", same(t::RAIL_CURVE + 2), Shape, 0.7, RAIL);
+    RAIL_SW = 121 => d("Rail", same(t::RAIL_CURVE + 3), Shape, 0.7, RAIL);
+    RAIL_UP_N = 122 => d("Rail", same(t::RAIL), Shape, 0.7, RAIL);
+    RAIL_UP_E = 123 => d("Rail", same(t::RAIL_EW), Shape, 0.7, RAIL);
+    RAIL_UP_S = 124 => d("Rail", same(t::RAIL), Shape, 0.7, RAIL);
+    RAIL_UP_W = 125 => d("Rail", same(t::RAIL_EW), Shape, 0.7, RAIL);
+    POWERED_RAIL = 126 => d("Powered Rail", same(t::POWERED_RAIL), Shape, 0.7, POWERED_RAIL);
+    POWERED_RAIL_EW = 127 => d("Powered Rail", same(t::POWERED_RAIL + 1), Shape, 0.7, POWERED_RAIL);
+    POWERED_RAIL_ON = 128 => BlockDef { light: 3, ..d("Powered Rail", same(t::POWERED_RAIL + 2), Shape, 0.7, POWERED_RAIL) };
+    POWERED_RAIL_EW_ON = 129 => BlockDef { light: 3, ..d("Powered Rail", same(t::POWERED_RAIL + 3), Shape, 0.7, POWERED_RAIL) };
+    TRADING_POST = 130 => d("Trading Post", [t::TRADE_TOP, t::TRADE_SIDE, t::PLANKS], Solid, 2.5, TRADING_POST);
+    EMERALD_ORE = 131 => BlockDef { needs_pick: true, ..d("Emerald Ore", same(t::EMERALD_ORE), Solid, 3.0, EMERALD) };
+    EMBERSTONE = 132 => BlockDef { needs_pick: true, ..d("Emberstone", same(t::EMBERSTONE), Solid, 0.6, EMBERSTONE) };
+    EMBER_BRICK = 133 => BlockDef { needs_pick: true, ..d("Ember Bricks", same(t::EMBER_BRICK), Solid, 2.0, EMBER_BRICK) };
+    QUARTZ_ORE = 134 => BlockDef { needs_pick: true, ..d("Quartz Ore", same(t::QUARTZ_ORE), Solid, 1.5, QUARTZ) };
+    ASH_SAND = 135 => d("Ash Sand", same(t::ASH_SAND), Solid, 0.5, ASH_SAND);
+    EMBER_PORTAL = 136 => BlockDef { light: 11, ..d("Ember Portal", same(t::EMBER_PORTAL), Shape, -1.0, 0) };
+    SKY_PORTAL = 137 => BlockDef { light: 11, ..d("Sky Portal", same(t::SKY_PORTAL), Shape, -1.0, 0) };
+    CLOUDSTONE = 138 => BlockDef { needs_pick: true, ..d("Cloudstone", same(t::CLOUDSTONE), Solid, 1.5, CLOUDSTONE) };
+    EMERALD_BLOCK = 139 => BlockDef { needs_pick: true, ..d("Emerald Block", same(t::EMERALD_BLOCK), Solid, 4.0, EMERALD_BLOCK) };
 }
 
-// Items that aren't blocks live at 128 and up.
-pub const STICK: BlockId = 128;
-pub const COAL: BlockId = 129;
-pub const IRON_INGOT: BlockId = 130;
-pub const GOLD_INGOT: BlockId = 131;
-pub const DIAMOND: BlockId = 132;
-pub const WOOD_PICK: BlockId = 133;
-pub const STONE_PICK: BlockId = 134;
-pub const IRON_PICK: BlockId = 135;
-pub const DIAMOND_PICK: BlockId = 136;
-pub const APPLE: BlockId = 137;
-pub const BREAD: BlockId = 138;
-pub const SEEDS: BlockId = 139;
-pub const WHEAT: BlockId = 140;
-pub const COPPER_INGOT: BlockId = 141;
-pub const WOOD_AXE: BlockId = 142;
-pub const DIAMOND_AXE: BlockId = 145;
-pub const WOOD_SHOVEL: BlockId = 146;
-pub const DIAMOND_SHOVEL: BlockId = 149;
-pub const WOOD_HOE: BlockId = 150;
-pub const DIAMOND_HOE: BlockId = 153;
-pub const IRON_HELMET: BlockId = 154;
-pub const IRON_CHESTPLATE: BlockId = 155;
-pub const IRON_LEGGINGS: BlockId = 156;
-pub const IRON_BOOTS: BlockId = 157;
-pub const DIAMOND_HELMET: BlockId = 158;
-pub const DIAMOND_CHESTPLATE: BlockId = 159;
-pub const DIAMOND_LEGGINGS: BlockId = 160;
-pub const DIAMOND_BOOTS: BlockId = 161;
-pub const BUCKET: BlockId = 162;
-pub const WATER_BUCKET: BlockId = 163;
-pub const LAVA_BUCKET: BlockId = 164;
-pub const ITEM_END: BlockId = 165;
+// Items that aren't blocks live at 160 and up.
+pub const STICK: BlockId = 160;
+pub const COAL: BlockId = 161;
+pub const IRON_INGOT: BlockId = 162;
+pub const GOLD_INGOT: BlockId = 163;
+pub const DIAMOND: BlockId = 164;
+pub const WOOD_PICK: BlockId = 165;
+pub const STONE_PICK: BlockId = 166;
+pub const IRON_PICK: BlockId = 167;
+pub const DIAMOND_PICK: BlockId = 168;
+pub const APPLE: BlockId = 169;
+pub const BREAD: BlockId = 170;
+pub const SEEDS: BlockId = 171;
+pub const WHEAT: BlockId = 172;
+pub const COPPER_INGOT: BlockId = 173;
+pub const WOOD_AXE: BlockId = 174;
+pub const DIAMOND_AXE: BlockId = 177;
+pub const WOOD_SHOVEL: BlockId = 178;
+pub const DIAMOND_SHOVEL: BlockId = 181;
+pub const WOOD_HOE: BlockId = 182;
+pub const DIAMOND_HOE: BlockId = 185;
+pub const IRON_HELMET: BlockId = 186;
+pub const IRON_CHESTPLATE: BlockId = 187;
+pub const IRON_LEGGINGS: BlockId = 188;
+pub const IRON_BOOTS: BlockId = 189;
+pub const DIAMOND_HELMET: BlockId = 190;
+pub const DIAMOND_CHESTPLATE: BlockId = 191;
+pub const DIAMOND_LEGGINGS: BlockId = 192;
+pub const DIAMOND_BOOTS: BlockId = 193;
+pub const BUCKET: BlockId = 194;
+pub const WATER_BUCKET: BlockId = 195;
+pub const LAVA_BUCKET: BlockId = 196;
+pub const EMERALD: BlockId = 197;
+pub const QUARTZ: BlockId = 198;
+pub const FLINT_STEEL: BlockId = 199;
+pub const MINECART: BlockId = 200;
+pub const TRAIN: BlockId = 201;
+pub const BOAT: BlockId = 202;
+pub const CAR: BlockId = 203;
+pub const ITEM_END: BlockId = 204;
 
 /// An inventory stack: what, how many, and how worn (tools).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -380,7 +458,7 @@ pub fn fuel_time(id: BlockId) -> f32 {
     match id {
         COAL => 80.0,
         LAVA_BUCKET => 400.0,
-        PLANKS | OAK_LOG | BIRCH_LOG | SPRUCE_LOG | CRAFTING_TABLE | BOOKSHELF | CHEST | LADDER | DOOR => 15.0,
+        PLANKS | OAK_LOG | BIRCH_LOG | SPRUCE_LOG | CRAFTING_TABLE | BOOKSHELF | CHEST | LADDER | DOOR | TRADING_POST | BOAT => 15.0,
         STICK | SAPLING => 5.0,
         WOOD_PICK | WOOD_AXE | WOOD_SHOVEL | WOOD_HOE => 10.0,
         _ => 0.0,
@@ -441,7 +519,39 @@ pub fn shape_boxes(id: BlockId) -> &'static [[f32; 6]] {
         BED => &[[0.0, 0.0, 0.0, 1.0, 9.0 / 16.0, 1.0]],
         CHEST => &[[1.0 / 16.0, 0.0, 1.0 / 16.0, 15.0 / 16.0, 14.0 / 16.0, 15.0 / 16.0]],
         FARMLAND => &[[0.0, 0.0, 0.0, 1.0, 15.0 / 16.0, 1.0]],
-        RAIL => &[[0.0, 0.0, 0.0, 1.0, 1.0 / 16.0, 1.0]],
+        RAIL | RAIL_EW..=RAIL_SW | POWERED_RAIL..=POWERED_RAIL_EW_ON | WIRE | WIRE_ON => &[[0.0, 0.0, 0.0, 1.0, 1.0 / 16.0, 1.0]],
+        // Sloped rails: four thin steps climbing toward the high side.
+        RAIL_UP_N => &[
+            [0.0, 0.1875, 0.75, 1.0, 0.25, 1.0],
+            [0.0, 0.4375, 0.5, 1.0, 0.5, 0.75],
+            [0.0, 0.6875, 0.25, 1.0, 0.75, 0.5],
+            [0.0, 0.9375, 0.0, 1.0, 1.0, 0.25],
+        ],
+        RAIL_UP_S => &[
+            [0.0, 0.1875, 0.0, 1.0, 0.25, 0.25],
+            [0.0, 0.4375, 0.25, 1.0, 0.5, 0.5],
+            [0.0, 0.6875, 0.5, 1.0, 0.75, 0.75],
+            [0.0, 0.9375, 0.75, 1.0, 1.0, 1.0],
+        ],
+        RAIL_UP_E => &[
+            [0.0, 0.1875, 0.0, 0.25, 0.25, 1.0],
+            [0.25, 0.4375, 0.0, 0.5, 0.5, 1.0],
+            [0.5, 0.6875, 0.0, 0.75, 0.75, 1.0],
+            [0.75, 0.9375, 0.0, 1.0, 1.0, 1.0],
+        ],
+        RAIL_UP_W => &[
+            [0.75, 0.1875, 0.0, 1.0, 0.25, 1.0],
+            [0.5, 0.4375, 0.0, 0.75, 0.5, 1.0],
+            [0.25, 0.6875, 0.0, 0.5, 0.75, 1.0],
+            [0.0, 0.9375, 0.0, 0.25, 1.0, 1.0],
+        ],
+        LEVER => &[[0.3125, 0.0, 0.25, 0.6875, 0.1875, 0.75], [0.4375, 0.1875, 0.3125, 0.5625, 0.625, 0.4375]],
+        LEVER_ON => &[[0.3125, 0.0, 0.25, 0.6875, 0.1875, 0.75], [0.4375, 0.1875, 0.5625, 0.5625, 0.625, 0.6875]],
+        BUTTON => &[[0.3125, 0.0, 0.375, 0.6875, 0.125, 0.625]],
+        BUTTON_ON => &[[0.3125, 0.0, 0.375, 0.6875, 0.0625, 0.625]],
+        PLATE => &[[0.0625, 0.0, 0.0625, 0.9375, 0.0625, 0.9375]],
+        PLATE_ON => &[[0.0625, 0.0, 0.0625, 0.9375, 0.03125, 0.9375]],
+        RTORCH | RTORCH_OFF => &[[7.0 / 16.0, 0.0, 7.0 / 16.0, 9.0 / 16.0, 10.0 / 16.0, 9.0 / 16.0]],
         _ if is_ladder(id) => match id - LADDER {
             0 => &[[0.0, 0.0, 0.0, 1.0, 1.0, 1.0 / 16.0]],
             1 => &[[15.0 / 16.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
@@ -463,10 +573,85 @@ pub fn shape_boxes(id: BlockId) -> &'static [[f32; 6]] {
 pub fn collision_boxes(id: BlockId) -> &'static [[f32; 6]] {
     match def(id).kind {
         Kind::Solid | Kind::Cutout => &[[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
-        Kind::Shape if id == TORCH || id == RAIL || is_ladder(id) => &[],
+        Kind::Shape if walk_through(id) || is_ladder(id) => &[],
         Kind::Shape => shape_boxes(id),
         _ => &[],
     }
+}
+
+/// Shaped blocks you walk through: torches, rails, dust, switches and portals.
+pub fn walk_through(id: BlockId) -> bool {
+    is_rail(id) || matches!(id, TORCH | WIRE | WIRE_ON | LEVER | LEVER_ON | BUTTON | BUTTON_ON | PLATE | PLATE_ON | RTORCH | RTORCH_OFF | EMBER_PORTAL | SKY_PORTAL)
+}
+
+/// Blocks that need a solid block under them, and break when it goes.
+pub fn needs_support(id: BlockId) -> bool {
+    matches!(def(id).kind, Kind::Plant) || walk_through(id) && !matches!(id, EMBER_PORTAL | SKY_PORTAL)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rails. Directions: 0 north (-z), 1 east (+x), 2 south (+z), 3 west (-x).
+
+pub const DIRS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+
+pub fn is_rail(id: BlockId) -> bool {
+    id == RAIL || (RAIL_EW..=RAIL_UP_W).contains(&id) || (POWERED_RAIL..=POWERED_RAIL_EW_ON).contains(&id)
+}
+
+/// The two directions a rail leads, and which of them climbs a block (sloped rails).
+pub fn rail_exits(id: BlockId) -> Option<([u8; 2], Option<u8>)> {
+    Some(match id {
+        RAIL | POWERED_RAIL | POWERED_RAIL_ON => ([0, 2], None),
+        RAIL_EW | POWERED_RAIL_EW | POWERED_RAIL_EW_ON => ([1, 3], None),
+        RAIL_NE => ([0, 1], None),
+        RAIL_NW => ([0, 3], None),
+        RAIL_SE => ([2, 1], None),
+        RAIL_SW => ([2, 3], None),
+        RAIL_UP_N => ([0, 2], Some(0)),
+        RAIL_UP_E => ([1, 3], Some(1)),
+        RAIL_UP_S => ([2, 0], Some(2)),
+        RAIL_UP_W => ([3, 1], Some(3)),
+        _ => return None,
+    })
+}
+
+/// The plain rail joining two directions.
+pub fn rail_joining(a: u8, b: u8) -> BlockId {
+    let (a, b) = (a.min(b), a.max(b));
+    match (a, b) {
+        (0, 1) => RAIL_NE,
+        (0, 3) => RAIL_NW,
+        (1, 2) => RAIL_SE,
+        (2, 3) => RAIL_SW,
+        (1, 3) => RAIL_EW,
+        _ => RAIL,
+    }
+}
+
+/// The rail sloping up toward direction `d`.
+pub fn rail_up(d: u8) -> BlockId {
+    RAIL_UP_N + (d & 3)
+}
+
+pub fn is_powered_rail(id: BlockId) -> bool {
+    (POWERED_RAIL..=POWERED_RAIL_EW_ON).contains(&id)
+}
+
+pub fn powered_rail(ew: bool, on: bool) -> BlockId {
+    POWERED_RAIL + ew as u8 + on as u8 * 2
+}
+
+// ---------------------------------------------------------------------------------------------
+// Redstone
+
+/// Blocks the redstone simulation looks after.
+pub fn is_redstone(id: BlockId) -> bool {
+    matches!(id, WIRE | WIRE_ON | LEVER | LEVER_ON | BUTTON | BUTTON_ON | PLATE | PLATE_ON | RTORCH | RTORCH_OFF | LAMP | LAMP_ON | REDSTONE_BLOCK) || is_powered_rail(id)
+}
+
+/// Blocks that give power on their own.
+pub fn is_power_source(id: BlockId) -> bool {
+    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | RTORCH | REDSTONE_BLOCK)
 }
 
 #[inline]
@@ -486,6 +671,9 @@ pub fn is_item(id: BlockId) -> bool {
 pub fn creative_palette() -> Vec<BlockId> {
     let hidden = |b: BlockId| {
         matches!(b, WATER | LAVA | BEDROCK | FURNACE_LIT | FARMLAND | WHEAT_0..=WHEAT_3 | WATER_1..=WATER_7 | LAVA_1..=LAVA_3)
+            || matches!(b, WIRE_ON | LEVER_ON | BUTTON_ON | PLATE_ON | RTORCH_OFF | LAMP_ON | EMBER_PORTAL | SKY_PORTAL)
+            || (RAIL_EW..=RAIL_UP_W).contains(&b)
+            || (POWERED_RAIL_EW..=POWERED_RAIL_EW_ON).contains(&b)
             || (DOOR + 1..=DOOR + 7).contains(&b)
             || (LADDER + 1..=LADDER + 3).contains(&b)
     };
@@ -522,6 +710,13 @@ pub fn item_name(id: BlockId) -> &'static str {
         BUCKET => "Bucket",
         WATER_BUCKET => "Water Bucket",
         LAVA_BUCKET => "Lava Bucket",
+        EMERALD => "Emerald",
+        QUARTZ => "Quartz",
+        FLINT_STEEL => "Flint and Steel",
+        MINECART => "Minecart",
+        TRAIN => "Train",
+        BOAT => "Boat",
+        CAR => "Car",
         _ => def(id).name,
     }
 }
@@ -550,6 +745,16 @@ pub fn item_tile(id: BlockId) -> u8 {
         BUCKET => tile::BUCKET,
         WATER_BUCKET => tile::WATER_BUCKET,
         LAVA_BUCKET => tile::LAVA_BUCKET,
+        EMERALD => tile::EMERALD,
+        QUARTZ => tile::QUARTZ,
+        FLINT_STEEL => tile::FLINT_STEEL,
+        MINECART => tile::MINECART,
+        TRAIN => tile::TRAIN,
+        BOAT => tile::BOAT,
+        CAR => tile::CAR,
+        LEVER | LEVER_ON => tile::LEVER,
+        BUTTON | BUTTON_ON => tile::BUTTON,
+        PLATE | PLATE_ON => tile::STONE,
         TORCH => tile::TORCH,
         DOOR => tile::DOOR_TOP,
         LADDER => tile::LADDER,
@@ -561,11 +766,11 @@ pub fn item_tile(id: BlockId) -> u8 {
 
 /// Items drawn as flat sprites in the inventory and in hand.
 pub fn is_flat(id: BlockId) -> bool {
-    !is_block(id) || matches!(def(id).kind, Kind::Plant) || matches!(id, TORCH | DOOR | LADDER | RAIL)
+    !is_block(id) || matches!(def(id).kind, Kind::Plant) || matches!(id, TORCH | DOOR | LADDER | LEVER | BUTTON | RTORCH | WIRE) || is_rail(id)
 }
 
 pub fn max_stack(id: BlockId) -> u8 {
-    if tool(id).is_some() || armor(id).is_some() || matches!(id, WATER_BUCKET | LAVA_BUCKET) {
+    if tool(id).is_some() || armor(id).is_some() || matches!(id, WATER_BUCKET | LAVA_BUCKET | FLINT_STEEL | MINECART | TRAIN | BOAT | CAR) {
         return 1;
     }
     match id {
@@ -594,8 +799,8 @@ enum Material {
 fn material(b: BlockId) -> Material {
     match b {
         _ if def(b).needs_pick => Material::Rock,
-        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | PLANKS | CRAFTING_TABLE | BOOKSHELF | CHEST | LADDER..=LADDER_81 | DOOR..=DOOR_77 | BED => Material::Wood,
-        DIRT | GRASS | SAND | GRAVEL | CLAY | SNOW | FARMLAND => Material::Soil,
+        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | PLANKS | CRAFTING_TABLE | BOOKSHELF | CHEST | LADDER..=LADDER_81 | DOOR..=DOOR_77 | BED | TRADING_POST => Material::Wood,
+        DIRT | GRASS | SAND | GRAVEL | CLAY | SNOW | FARMLAND | ASH_SAND => Material::Soil,
         _ => Material::Other,
     }
 }
@@ -617,8 +822,8 @@ pub fn can_harvest(held: BlockId, block: BlockId) -> bool {
     };
     let need = match block {
         b if !def(b).needs_pick => 0,
-        IRON_ORE | IRON_BLOCK | GOLD_ORE | GOLD_BLOCK | COPPER_ORE => 2,
-        DIAMOND_ORE | DIAMOND_BLOCK => 3,
+        IRON_ORE | IRON_BLOCK | GOLD_ORE | GOLD_BLOCK | COPPER_ORE | REDSTONE_ORE | EMERALD_ORE => 2,
+        DIAMOND_ORE | DIAMOND_BLOCK | EMERALD_BLOCK => 3,
         OBSIDIAN => 4,
         _ => 1,
     };
@@ -658,5 +863,14 @@ mod tests {
         assert!((STICK..ITEM_END).all(|i| item_name(i) != "Air"), "every item has a name");
         assert_eq!(armor(DIAMOND_CHESTPLATE), Some((1, 8)));
         assert!((tile::COUNT) <= 256);
+        assert_eq!(def(WHEAT_3).drop, WHEAT);
+        for id in 0..BLOCK_COUNT as u8 {
+            let d = def(id).drop;
+            assert!(d == AIR || is_block(d) || is_item(d), "{} drops nothing real", def(id).name);
+            if let Some((exits, up)) = rail_exits(id) {
+                assert!(up.is_none_or(|u| exits.contains(&u)));
+            }
+        }
+        assert_eq!(rail_joining(3, 2), RAIL_SW);
     }
 }

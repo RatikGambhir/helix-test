@@ -5,6 +5,10 @@
 mod containers;
 mod fluids;
 mod items;
+mod places;
+mod portals;
+mod redstone;
+mod vehicles;
 
 use containers::Container;
 use items::Item;
@@ -158,18 +162,28 @@ fn write_loop(stream: TcpStream, rx: Receiver<Arc<Vec<u8>>>) {
     let _ = w.get_ref().shutdown(std::net::Shutdown::Both);
 }
 
-const SAVE_VERSION: u32 = 3;
+const SAVE_VERSION: u32 = 4;
+
+/// The overworld, the Ember realm and the Sky realm.
+pub const DIMENSIONS: usize = 3;
+
+#[derive(Serialize, Deserialize, Default)]
+struct LevelSave {
+    edits: Vec<((i32, i32), Vec<(u32, u8)>)>,
+    containers: Vec<([i32; 3], Container)>,
+    vehicles: Vec<vehicles::Vehicle>,
+}
 
 #[derive(Serialize, Deserialize, Default)]
 struct Save {
     version: u32,
     seed: u64,
     time: f32,
-    edits: Vec<((i32, i32), Vec<(u32, u8)>)>,
-    players: Vec<(String, [f32; 3])>,
+    levels: Vec<LevelSave>,
+    players: Vec<(String, [f32; 3], u8)>,
     saves: Vec<(String, PlayerSave)>,
     spawns: Vec<(String, [f32; 3])>,
-    containers: Vec<([i32; 3], Container)>,
+    places: Vec<places::PlaceInfo>,
 }
 
 pub(crate) struct Player {
@@ -183,6 +197,10 @@ pub(crate) struct Player {
     sleeping: bool,
     open: Option<[i32; 3]>,
     armor: f32,
+    dim: u8,
+    /// Seconds spent standing in a portal, and whether you must step out before it works again.
+    portal: (f32, bool),
+    riding: Option<(u32, u8)>,
 }
 
 impl Player {
@@ -202,27 +220,43 @@ struct Loaded {
     encoded: Option<Arc<Vec<u8>>>,
 }
 
-pub(crate) struct World {
-    cfg: Config,
-    seed: u64,
-    time: f32,
+/// Everything in one dimension: its blocks and what is happening in them.
+#[derive(Default)]
+pub(crate) struct Level {
     columns: HashMap<(i32, i32), Loaded>,
     edits: HashMap<(i32, i32), HashMap<u32, u8>>,
-    saved_pos: HashMap<String, [f32; 3]>,
-    saves: HashMap<String, PlayerSave>,
-    spawns: HashMap<String, [f32; 3]>,
     pending: HashSet<(i32, i32)>,
-    jobs: Sender<(i32, i32)>,
-    done: Receiver<(i32, i32, Column)>,
-    players: HashMap<u32, Player>,
     items: HashMap<u32, Item>,
-    next_item: u32,
-    merge_clock: f32,
     containers: HashMap<[i32; 3], Container>,
     fluid_active: HashSet<[i32; 3]>,
     fluid_clock: (f32, f32),
     growing: HashSet<[i32; 3]>,
     fuses: Vec<(f32, [i32; 3])>,
+    pub(crate) rs: redstone::Redstone,
+    pub(crate) vehicles: HashMap<u32, vehicles::Vehicle>,
+    pub(crate) vehicles_dirty: bool,
+    pub(crate) vehicle_clock: f32,
+}
+
+pub(crate) struct World {
+    cfg: Config,
+    seed: u64,
+    time: f32,
+    /// The dimension being worked on; its level is `lv`, the others wait in `parked`.
+    dim: u8,
+    lv: Level,
+    parked: Vec<Level>,
+    saved_pos: HashMap<String, ([f32; 3], u8)>,
+    saves: HashMap<String, PlayerSave>,
+    spawns: HashMap<String, [f32; 3]>,
+    jobs: Sender<(u8, i32, i32)>,
+    done: Receiver<(u8, i32, i32, Column)>,
+    players: HashMap<u32, Player>,
+    next_item: u32,
+    merge_clock: f32,
+    places: Arc<std::sync::RwLock<Vec<Arc<runecraft_common::osm::Place>>>>,
+    place_info: Vec<places::PlaceInfo>,
+    place_results: (Sender<places::Loaded>, Receiver<places::Loaded>),
     rain: f32,
     thunder: bool,
     weather_timer: f32,
@@ -247,45 +281,53 @@ impl World {
             Err(_) => Save { version: SAVE_VERSION, seed: cfg.seed, time: 0.3, ..Default::default() },
         };
         let seed = save.seed;
-        let edits = save.edits.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect();
-        let (jobs, job_rx) = mpsc::channel::<(i32, i32)>();
+        let mut levels: Vec<Level> = (0..DIMENSIONS).map(|_| Level::default()).collect();
+        for (lv, ls) in levels.iter_mut().zip(save.levels) {
+            lv.edits = ls.edits.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect();
+            lv.containers = ls.containers.into_iter().collect();
+            lv.vehicles = ls.vehicles.into_iter().map(|v| (v.id, v)).collect();
+        }
+        let next_item = levels.iter().flat_map(|l| l.vehicles.keys()).max().map_or(1, |m| m + 1);
+        let place_list: Vec<Arc<runecraft_common::osm::Place>> = save.places.iter().filter_map(|p| places::load(&cfg.world_dir, p)).map(Arc::new).collect();
+        let places = Arc::new(std::sync::RwLock::new(place_list));
+        let (jobs, job_rx) = mpsc::channel::<(u8, i32, i32)>();
         let (done_tx, done) = mpsc::channel();
         let job_rx = Arc::new(Mutex::new(job_rx));
         let workers = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8) - 1;
         for i in 0..workers.max(1) {
             let job_rx = job_rx.clone();
             let done_tx = done_tx.clone();
+            let places = places.clone();
             let _ = thread::Builder::new().name(format!("gen-{i}")).spawn(move || {
                 loop {
                     let job = job_rx.lock().unwrap().recv();
-                    let Ok((cx, cz)) = job else { return };
-                    let col = worldgen::generate(seed, cx, cz);
-                    if done_tx.send((cx, cz, col)).is_err() {
+                    let Ok((dim, cx, cz)) = job else { return };
+                    let list = places.read().map(|l| l.clone()).unwrap_or_default();
+                    let col = worldgen::generate_in(seed, dim, cx, cz, &list);
+                    if done_tx.send((dim, cx, cz, col)).is_err() {
                         return;
                     }
                 }
             });
         }
+        let lv = std::mem::take(&mut levels[0]);
         World {
             seed,
             time: save.time,
-            columns: HashMap::new(),
-            edits,
-            saved_pos: save.players.into_iter().collect(),
+            dim: 0,
+            lv,
+            parked: levels,
+            saved_pos: save.players.into_iter().map(|(n, p, d)| (n, (p, d))).collect(),
             saves: save.saves.into_iter().collect(),
             spawns: save.spawns.into_iter().collect(),
-            pending: HashSet::new(),
             jobs,
             done,
             players: HashMap::new(),
-            items: HashMap::new(),
-            next_item: 1,
+            next_item,
             merge_clock: 0.0,
-            containers: save.containers.into_iter().collect(),
-            fluid_active: HashSet::new(),
-            fluid_clock: (0.0, 0.0),
-            growing: HashSet::new(),
-            fuses: Vec::new(),
+            places,
+            place_info: save.places,
+            place_results: mpsc::channel(),
             rain: 0.0,
             thunder: false,
             weather_timer: 300.0,
@@ -304,14 +346,21 @@ impl World {
 
     fn save(&mut self) {
         let mut save = Save { version: SAVE_VERSION, seed: self.seed, time: self.time, ..Default::default() };
-        save.edits = self.edits.iter().map(|(k, v)| (*k, v.iter().map(|(a, b)| (*a, *b)).collect())).collect();
-        for p in self.players.values() {
-            self.saved_pos.insert(p.name.clone(), p.pose.pos);
+        for d in 0..DIMENSIONS as u8 {
+            let lv = self.level(d);
+            save.levels.push(LevelSave {
+                edits: lv.edits.iter().map(|(k, v)| (*k, v.iter().map(|(a, b)| (*a, *b)).collect())).collect(),
+                containers: lv.containers.iter().map(|(k, v)| (*k, v.clone())).collect(),
+                vehicles: lv.vehicles.values().cloned().collect(),
+            });
         }
-        save.players = self.saved_pos.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        for p in self.players.values() {
+            self.saved_pos.insert(p.name.clone(), (p.pose.pos, p.dim));
+        }
+        save.players = self.saved_pos.iter().map(|(k, v)| (k.clone(), v.0, v.1)).collect();
         save.saves = self.saves.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         save.spawns = self.spawns.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        save.containers = self.containers.iter().map(|(k, v)| (*k, v.clone())).collect();
+        save.places = self.place_info.clone();
         let _ = std::fs::create_dir_all(&self.cfg.world_dir);
         if let Ok(bytes) = bincode::serialize(&save) {
             let tmp = self.cfg.world_dir.join("world.dat.tmp");
@@ -345,43 +394,48 @@ impl World {
             let now = Instant::now();
             let dt = (now - last).as_secs_f32().min(0.5);
             last = now;
-            while let Ok((cx, cz, mut col)) = self.done.try_recv() {
-                self.pending.remove(&(cx, cz));
-                if let Some(e) = self.edits.get(&(cx, cz)) {
-                    for (&i, &b) in e {
-                        if (i as usize) < col.blocks.len() {
-                            col.blocks[i as usize] = b;
-                            if matches!(b, block::WHEAT_0..=block::WHEAT_2 | block::SAPLING) {
-                                let (lx, y, lz) = (i as i32 % CHUNK, i as i32 / (CHUNK * CHUNK), (i as i32 / CHUNK) % CHUNK);
-                                self.growing.insert([cx * CHUNK + lx, y, cz * CHUNK + lz]);
-                            }
-                        }
-                    }
-                    col.recompute_heights();
-                }
-                self.columns.insert((cx, cz), Loaded { col, encoded: None });
+            while let Ok((dim, cx, cz, col)) = self.done.try_recv() {
+                self.enter(dim);
+                self.lv.pending.remove(&(cx, cz));
+                self.insert_column(cx, cz, col);
             }
-            self.stream_chunks();
+            self.poll_places();
             self.time = (self.time + dt / DAY_LENGTH).fract();
             since_time += dt;
             if since_time > 5.0 {
                 since_time = 0.0;
                 self.broadcast(&ToClient::Time(self.time));
             }
-            self.tick_fuses(dt);
-            self.tick_fluids(dt);
-            self.tick_containers(dt);
-            self.tick_weather(dt);
-            self.tick_items(dt);
             since_grow += dt;
+            since_gc += dt;
+            for d in 0..DIMENSIONS as u8 {
+                self.enter(d);
+                let here = self.players.values().any(|p| p.dim == d);
+                if !here && self.lv.columns.is_empty() {
+                    continue;
+                }
+                self.stream_chunks();
+                self.tick_fuses(dt);
+                self.tick_fluids(dt);
+                self.tick_containers(dt);
+                self.tick_items(dt);
+                self.tick_redstone(dt);
+                self.tick_vehicles(dt);
+                self.tick_portals(dt);
+                if since_grow > 1.0 {
+                    self.tick_growth();
+                }
+                if since_gc > 10.0 {
+                    self.unload_far();
+                }
+            }
+            self.enter(0);
+            self.tick_weather(dt);
             if since_grow > 1.0 {
                 since_grow = 0.0;
-                self.tick_growth();
             }
-            since_gc += dt;
             if since_gc > 10.0 {
                 since_gc = 0.0;
-                self.unload_far();
             }
             since_save += dt;
             if since_save > 30.0 {
@@ -397,6 +451,65 @@ impl World {
         self.save();
     }
 
+    /// Switches the world to dimension `d`: its level becomes `self.lv`.
+    pub(crate) fn enter(&mut self, d: u8) {
+        if d == self.dim || d as usize >= DIMENSIONS {
+            return;
+        }
+        let cur = self.dim as usize;
+        std::mem::swap(&mut self.lv, &mut self.parked[cur]);
+        std::mem::swap(&mut self.lv, &mut self.parked[d as usize]);
+        self.dim = d;
+    }
+
+    fn level(&self, d: u8) -> &Level {
+        if d == self.dim { &self.lv } else { &self.parked[d as usize] }
+    }
+
+    /// A freshly generated column joins the current level, with the player edits made to it.
+    fn insert_column(&mut self, cx: i32, cz: i32, mut col: Column) {
+        if let Some(e) = self.lv.edits.get(&(cx, cz)) {
+            for (&i, &b) in e {
+                if (i as usize) < col.blocks.len() {
+                    col.blocks[i as usize] = b;
+                }
+            }
+            col.recompute_heights();
+        }
+        // Growing crops and redstone in it come back to life.
+        let edited: Vec<(u32, u8)> = self.lv.edits.get(&(cx, cz)).map(|e| e.iter().map(|(a, b)| (*a, *b)).collect()).unwrap_or_default();
+        for (i, b) in edited {
+            let (lx, y, lz) = (i as i32 % CHUNK, i as i32 / (CHUNK * CHUNK), (i as i32 / CHUNK) % CHUNK);
+            let pos = [cx * CHUNK + lx, y, cz * CHUNK + lz];
+            if matches!(b, block::WHEAT_0..=block::WHEAT_2 | block::SAPLING) {
+                self.lv.growing.insert(pos);
+            }
+            if block::is_redstone(b) {
+                self.lv.rs.track(pos);
+            }
+        }
+        self.lv.columns.insert((cx, cz), Loaded { col, encoded: None });
+    }
+
+    /// Generates a column now, on this thread, if it isn't loaded (for portals and travel).
+    pub(crate) fn ensure_column(&mut self, cx: i32, cz: i32) {
+        if self.lv.columns.contains_key(&(cx, cz)) {
+            return;
+        }
+        let list = self.places.read().map(|l| l.clone()).unwrap_or_default();
+        let col = worldgen::generate_in(self.seed, self.dim, cx, cz, &list);
+        self.lv.pending.remove(&(cx, cz));
+        self.insert_column(cx, cz, col);
+    }
+
+    /// To every player in the current dimension.
+    pub(crate) fn broadcast_dim(&self, msg: &ToClient) {
+        let frame = Arc::new(encode_frame(msg));
+        for p in self.players.values().filter(|p| p.dim == self.dim) {
+            let _ = p.out.send(frame.clone());
+        }
+    }
+
     pub(crate) fn broadcast(&self, msg: &ToClient) {
         let frame = Arc::new(encode_frame(msg));
         for p in self.players.values() {
@@ -407,7 +520,7 @@ impl World {
     fn broadcast_except(&self, except: u32, msg: &ToClient) {
         let frame = Arc::new(encode_frame(msg));
         for (id, p) in &self.players {
-            if *id != except {
+            if *id != except && p.dim == self.dim {
                 let _ = p.out.send(frame.clone());
             }
         }
@@ -436,7 +549,8 @@ impl World {
                     name = format!("{base}{n}");
                     n += 1;
                 }
-                let pos = self.saved_pos.get(&name).copied().unwrap_or(self.spawn);
+                let (pos, dim) = self.saved_pos.get(&name).copied().unwrap_or((self.spawn, 0));
+                let dim = dim.min(DIMENSIONS as u8 - 1);
                 let pose = Pose { pos, yaw: 0.0, pitch: 0.0 };
                 let p = Player {
                     name: name.clone(),
@@ -449,10 +563,14 @@ impl World {
                     sleeping: false,
                     open: None,
                     armor: 0.0,
+                    dim,
+                    portal: (0.0, true),
+                    riding: None,
                 };
                 p.send(&ToClient::Welcome {
                     id: conn,
                     seed: self.seed,
+                    dim,
                     spawn: pos,
                     time: self.time,
                     world: self.cfg.world_dir.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -461,17 +579,25 @@ impl World {
                 });
                 p.send(&ToClient::SpawnPoint(self.spawns.get(&name).copied().unwrap_or(self.spawn)));
                 p.send(&ToClient::Weather { rain: self.rain, thunder: self.thunder });
-                for (id, other) in &self.players {
+                p.send(&self.places_message());
+                for (id, other) in self.players.iter().filter(|(_, o)| o.dim == dim) {
                     p.send(&ToClient::PlayerJoined { id: *id, name: other.name.clone(), skin: other.skin, pose: other.pose });
                     p.send(&ToClient::PlayerHeld { id: *id, item: other.held });
                 }
-                self.broadcast(&ToClient::PlayerJoined { id: conn, name: name.clone(), skin, pose });
+                let joined = encode_frame(&ToClient::PlayerJoined { id: conn, name: name.clone(), skin, pose });
+                for o in self.players.values().filter(|o| o.dim == dim) {
+                    let _ = o.out.send(Arc::new(joined.clone()));
+                }
+                self.enter(dim);
+                p.send(&self.vehicles_message());
                 self.players.insert(conn, p);
                 self.system(format!("{name} joined the game"));
             }
             Event::Leave(conn) => {
                 if let Some(p) = self.players.remove(&conn) {
-                    self.saved_pos.insert(p.name.clone(), p.pose.pos);
+                    self.saved_pos.insert(p.name.clone(), (p.pose.pos, p.dim));
+                    self.enter(p.dim);
+                    self.dismount(conn, p.riding);
                     self.dirty = true;
                     self.broadcast(&ToClient::PlayerLeft { id: conn });
                     self.system(format!("{} left the game", p.name));
@@ -482,6 +608,8 @@ impl World {
     }
 
     fn message(&mut self, conn: u32, msg: ToServer) {
+        let Some(dim) = self.players.get(&conn).map(|p| p.dim) else { return };
+        self.enter(dim);
         match msg {
             ToServer::Hello { .. } => {}
             ToServer::Move(pose) => {
@@ -490,11 +618,21 @@ impl World {
                 }
                 self.broadcast_except(conn, &ToClient::PlayerMoved { id: conn, pose });
             }
+            ToServer::Light { pos } => self.light(pos),
+            ToServer::PlaceVehicle { kind, pos, yaw } => self.place_vehicle(kind, pos, yaw),
+            ToServer::Mount { id, seat } => self.mount(conn, id, seat),
+            ToServer::Dismount => {
+                let r = self.players.get(&conn).and_then(|p| p.riding);
+                self.dismount(conn, r);
+            }
+            ToServer::VehicleMove { id, pos, yaw, speed, cars } => self.vehicle_moved(conn, id, pos, yaw, speed, cars),
+            ToServer::BreakVehicle { id } => self.break_vehicle(conn, id),
+            ToServer::LoadPlace(query) => self.load_place(conn, query),
             ToServer::SetBlock { pos, block } => {
                 if (0..HEIGHT).contains(&pos[1]) && (block as usize) < block::BLOCK_COUNT {
                     self.set_block(pos, block);
                     if matches!(block, block::WHEAT_0..=block::WHEAT_2 | block::SAPLING) {
-                        self.growing.insert(pos);
+                        self.lv.growing.insert(pos);
                     }
                 }
             }
@@ -510,7 +648,7 @@ impl World {
             ToServer::Ignite { pos } => {
                 if self.get(pos[0], pos[1], pos[2]) == block::TNT {
                     self.set_block(pos, block::AIR);
-                    self.fuses.push((3.0, pos));
+                    self.lv.fuses.push((3.0, pos));
                 }
             }
             ToServer::ViewDistance(v) => {
@@ -519,7 +657,7 @@ impl World {
                     p.view = v.clamp(2, max);
                 }
             }
-            ToServer::Travel { pos } => self.teleport(conn, pos),
+            ToServer::Travel { pos } => self.change_dim(conn, 0, pos),
             ToServer::Drop { stack, pos, vel } => {
                 if stack.n > 0 {
                     // Thrown items can't be caught again straight away; block drops can.
@@ -555,7 +693,7 @@ impl World {
     fn command(&mut self, conn: u32, text: &str) {
         let parts: Vec<&str> = text[1..].split_whitespace().collect();
         match parts.as_slice() {
-            ["help"] => self.tell(conn, "Commands: /tp <city|x y z|player>, /spawn, /time <day|night|noon|midnight>, /weather <clear|rain|thunder>, /give <item> [count], /list, /seed, /cities"),
+            ["help"] => self.tell(conn, "Commands: /tp <city|x y z|player|place n>, /spawn, /time <day|night|noon|midnight>, /weather <clear|rain|thunder>, /give <item> [count], /list, /seed, /cities, /place <real place>, /places, /realm <overworld|ember|sky>"),
             ["list"] => {
                 let names: Vec<_> = self.players.values().map(|p| p.name.clone()).collect();
                 self.tell(conn, format!("{} online: {}", names.len(), names.join(", ")));
@@ -567,7 +705,31 @@ impl World {
             ["seed"] => self.tell(conn, format!("Seed: {}", self.seed)),
             ["spawn"] => {
                 let pos = self.spawn;
-                self.teleport(conn, pos);
+                self.change_dim(conn, 0, pos);
+            }
+            ["place", rest @ ..] if !rest.is_empty() => self.load_place(conn, rest.join(" ")),
+            ["places"] => {
+                let names: Vec<String> = self.place_info.iter().enumerate().map(|(i, p)| format!("{} {}", i + 1, p.name)).collect();
+                if names.is_empty() {
+                    self.tell(conn, "No real places loaded yet. Try /place Times Square, New York");
+                } else {
+                    self.tell(conn, format!("Real places: {}. Travel with /tp place <number>.", names.join(", ")));
+                }
+            }
+            ["tp", "place", n] => match n.parse::<usize>().ok().and_then(|n| self.place_info.get(n.wrapping_sub(1))) {
+                Some(p) => {
+                    let pos = p.arrival();
+                    self.change_dim(conn, 0, pos);
+                }
+                None => self.tell(conn, "No such place. See /places"),
+            },
+            ["realm", r] => {
+                let d = match *r {
+                    "ember" => 1,
+                    "sky" => 2,
+                    _ => 0,
+                };
+                self.send_through_portal(conn, d);
             }
             ["time", t] => {
                 self.time = match *t {
@@ -614,11 +776,11 @@ impl World {
                 let want = rest.join(" ").to_lowercase();
                 if let Some(c) = CITIES.iter().find(|c| c.name.to_lowercase().replace(' ', "") == want.replace(' ', "")) {
                     let (x, y, z) = c.arrival();
-                    self.teleport(conn, [x, y, z]);
+                    self.change_dim(conn, 0, [x, y, z]);
                     self.tell(conn, format!("Welcome to {}!", c.name));
                 } else if let Some(p) = self.players.values().find(|p| p.name.to_lowercase() == want) {
-                    let pos = p.pose.pos;
-                    self.teleport(conn, pos);
+                    let (pos, d) = (p.pose.pos, p.dim);
+                    self.change_dim(conn, d, pos);
                 } else {
                     self.tell(conn, format!("No city or player called {want}"));
                 }
@@ -628,6 +790,8 @@ impl World {
     }
 
     fn teleport(&mut self, conn: u32, pos: [f32; 3]) {
+        let r = self.players.get(&conn).and_then(|p| p.riding);
+        self.dismount(conn, r);
         if let Some(p) = self.players.get_mut(&conn) {
             p.pose.pos = pos;
             p.sleeping = false;
@@ -635,35 +799,90 @@ impl World {
         }
     }
 
+    /// Moves a player to another dimension (through a portal, or back to the overworld).
+    pub(crate) fn change_dim(&mut self, conn: u32, d: u8, pos: [f32; 3]) {
+        let Some(old) = self.players.get(&conn).map(|p| p.dim) else { return };
+        if old == d {
+            self.teleport(conn, pos);
+            return;
+        }
+        self.enter(old);
+        let r = self.players.get(&conn).and_then(|p| p.riding);
+        self.dismount(conn, r);
+        // Players in the old dimension stop seeing each other; those in the new one meet.
+        let left = Arc::new(encode_frame(&ToClient::PlayerLeft { id: conn }));
+        let mut meet = Vec::new();
+        for (id, o) in &self.players {
+            if *id == conn {
+                continue;
+            }
+            if o.dim == old {
+                let _ = o.out.send(left.clone());
+                if let Some(me) = self.players.get(&conn) {
+                    me.send(&ToClient::PlayerLeft { id: *id });
+                }
+            } else if o.dim == d {
+                meet.push(*id);
+            }
+        }
+        let Some(me) = self.players.get_mut(&conn) else { return };
+        me.dim = d;
+        me.sent.clear();
+        me.pose.pos = pos;
+        me.sleeping = false;
+        me.open = None;
+        me.send(&ToClient::Dimension { dim: d, pos });
+        let (name, skin, pose, held) = (me.name.clone(), me.skin, me.pose, me.held);
+        for id in meet {
+            let o = &self.players[&id];
+            o.send(&ToClient::PlayerJoined { id: conn, name: name.clone(), skin, pose });
+            o.send(&ToClient::PlayerHeld { id: conn, item: held });
+            let me = &self.players[&conn];
+            me.send(&ToClient::PlayerJoined { id, name: o.name.clone(), skin: o.skin, pose: o.pose });
+            me.send(&ToClient::PlayerHeld { id, item: o.held });
+        }
+        self.enter(d);
+        let msg = self.vehicles_message();
+        self.players[&conn].send(&msg);
+    }
+
     pub(crate) fn get(&self, x: i32, y: i32, z: i32) -> BlockId {
         if !(0..HEIGHT).contains(&y) {
             return block::AIR;
         }
         let ((cx, lx), (cz, lz)) = (chunk::split(x), chunk::split(z));
-        self.columns.get(&(cx, cz)).map_or(block::BEDROCK, |l| l.col.get(lx, y, lz))
+        self.lv.columns.get(&(cx, cz)).map_or(block::BEDROCK, |l| l.col.get(lx, y, lz))
     }
 
     pub(crate) fn loaded(&self, x: i32, z: i32) -> bool {
-        self.columns.contains_key(&(x.div_euclid(CHUNK), z.div_euclid(CHUNK)))
+        self.lv.columns.contains_key(&(x.div_euclid(CHUNK), z.div_euclid(CHUNK)))
     }
 
     pub(crate) fn set_block(&mut self, pos: [i32; 3], b: BlockId) {
         let [x, y, z] = pos;
         let ((cx, lx), (cz, lz)) = (chunk::split(x), chunk::split(z));
-        let Some(l) = self.columns.get_mut(&(cx, cz)) else { return };
+        let Some(l) = self.lv.columns.get_mut(&(cx, cz)) else { return };
         let old = l.col.get(lx, y, lz);
         if old == b {
             return;
         }
         l.col.set(lx, y, lz, b);
         l.encoded = None;
-        self.edits.entry((cx, cz)).or_default().insert(chunk::index(lx, y, lz) as u32, b);
+        self.lv.edits.entry((cx, cz)).or_default().insert(chunk::index(lx, y, lz) as u32, b);
         self.dirty = true;
         let frame = Arc::new(encode_frame(&ToClient::BlockChanged { pos, block: b }));
         for p in self.players.values() {
-            if p.sent.contains(&(cx, cz)) {
+            if p.dim == self.dim && p.sent.contains(&(cx, cz)) {
                 let _ = p.out.send(frame.clone());
             }
+        }
+        if block::is_redstone(b) || block::is_redstone(old) {
+            self.lv.rs.changed(pos, b);
+        } else {
+            self.lv.rs.neighbour_changed(pos);
+        }
+        if matches!(old, block::EMBER_PORTAL | block::SKY_PORTAL | block::OBSIDIAN | block::GLOWSTONE) && !matches!(b, block::EMBER_PORTAL | block::SKY_PORTAL) {
+            self.break_portal(pos);
         }
         // A container broken: its contents spill out.
         let was_container = matches!(old, block::CHEST | block::FURNACE | block::FURNACE_LIT);
@@ -672,7 +891,7 @@ impl World {
             self.spill_container(pos);
         }
         if !matches!(b, block::WHEAT_0..=block::WHEAT_2 | block::SAPLING) {
-            self.growing.remove(&pos);
+            self.lv.growing.remove(&pos);
         }
         // Doors come in pairs: keep both halves the same.
         if let Some((upper, open, axis)) = block::door_parts(b) {
@@ -692,7 +911,7 @@ impl World {
         // Things that need support fall with it.
         let above = [x, y + 1, z];
         let up = self.get(above[0], above[1], above[2]);
-        if !block::is_solid(b) && (matches!(block::def(up).kind, block::Kind::Plant) || matches!(up, block::TORCH | block::RAIL)) && block::fluid(b).is_none() {
+        if !block::is_solid(b) && block::needs_support(up) && block::fluid(b).is_none() {
             self.set_block(above, block::AIR);
         }
         self.wake_fluids(pos);
@@ -700,7 +919,7 @@ impl World {
 
     fn stream_chunks(&mut self) {
         let mut wanted: Vec<(i32, i32)> = Vec::new();
-        let ids: Vec<u32> = self.players.keys().copied().collect();
+        let ids: Vec<u32> = self.players.iter().filter(|(_, p)| p.dim == self.dim).map(|(id, _)| *id).collect();
         for id in ids {
             let (center, view) = {
                 let p = &self.players[&id];
@@ -724,7 +943,7 @@ impl World {
                 if self.players[&id].sent.contains(&(cx, cz)) {
                     continue;
                 }
-                match self.columns.get_mut(&(cx, cz)) {
+                match self.lv.columns.get_mut(&(cx, cz)) {
                     Some(l) => {
                         let frame = l.encoded.get_or_insert_with(|| Arc::new(encode_frame(&ToClient::Column { cx, cz, data: l.col.encode() }))).clone();
                         let p = self.players.get_mut(&id).unwrap();
@@ -748,28 +967,29 @@ impl World {
             }
         }
         for k in wanted {
-            if self.pending.len() > 64 {
+            if self.lv.pending.len() > 64 {
                 break;
             }
-            if self.pending.insert(k) {
-                let _ = self.jobs.send(k);
+            if self.lv.pending.insert(k) {
+                let _ = self.jobs.send((self.dim, k.0, k.1));
             }
         }
     }
 
     fn unload_far(&mut self) {
-        let centers: Vec<((i32, i32), i32)> = self.players.values().map(|p| (p.chunk(), p.view as i32 + 4)).collect();
-        self.columns.retain(|&(cx, cz), _| centers.iter().any(|&((x, z), r)| (cx - x).abs().max((cz - z).abs()) <= r));
-        let loaded: HashSet<(i32, i32)> = self.columns.keys().copied().collect();
-        self.fluid_active.retain(|p| loaded.contains(&(p[0].div_euclid(CHUNK), p[2].div_euclid(CHUNK))));
+        let centers: Vec<((i32, i32), i32)> = self.players.values().filter(|p| p.dim == self.dim).map(|p| (p.chunk(), p.view as i32 + 4)).collect();
+        self.lv.columns.retain(|&(cx, cz), _| centers.iter().any(|&((x, z), r)| (cx - x).abs().max((cz - z).abs()) <= r));
+        let loaded: HashSet<(i32, i32)> = self.lv.columns.keys().copied().collect();
+        self.lv.fluid_active.retain(|p| loaded.contains(&(p[0].div_euclid(CHUNK), p[2].div_euclid(CHUNK))));
+        self.lv.rs.retain_loaded(&loaded);
     }
 
     fn tick_fuses(&mut self, dt: f32) {
-        for f in &mut self.fuses {
+        for f in &mut self.lv.fuses {
             f.0 -= dt;
         }
-        let due: Vec<[i32; 3]> = self.fuses.iter().filter(|f| f.0 <= 0.0).map(|f| f.1).collect();
-        self.fuses.retain(|f| f.0 > 0.0);
+        let due: Vec<[i32; 3]> = self.lv.fuses.iter().filter(|f| f.0 <= 0.0).map(|f| f.1).collect();
+        self.lv.fuses.retain(|f| f.0 > 0.0);
         for pos in due {
             self.explode(pos);
         }
@@ -795,7 +1015,7 @@ impl World {
                     if b == block::TNT {
                         self.set_block(p, block::AIR);
                         let fuse = 0.4 + self.rand() * 0.6;
-                        self.fuses.push((fuse, p));
+                        self.lv.fuses.push((fuse, p));
                         continue;
                     }
                     self.set_block(p, block::AIR);
@@ -809,8 +1029,8 @@ impl World {
                 }
             }
         }
-        self.broadcast(&ToClient::Explosion { pos: centre.to_array() });
-        for p in self.players.values() {
+        self.broadcast_dim(&ToClient::Explosion { pos: centre.to_array() });
+        for p in self.players.values().filter(|p| p.dim == self.dim) {
             let d = p.pos().distance(centre);
             if d < 8.0 {
                 p.send(&ToClient::Damage { amount: (8.0 - d) * 2.5, from: centre.to_array() });
@@ -834,7 +1054,7 @@ impl World {
             self.lightning_timer -= dt;
             if self.lightning_timer <= 0.0 {
                 self.lightning_timer = 6.0 + self.rand() * 14.0;
-                let ps: Vec<Vec3> = self.players.values().map(|p| p.pos()).collect();
+                let ps: Vec<Vec3> = self.players.values().filter(|p| p.dim == 0).map(|p| p.pos()).collect();
                 if ps.is_empty() {
                     return;
                 }
@@ -846,10 +1066,10 @@ impl World {
                     return;
                 }
                 let ((cx, lx), (cz, lz)) = (chunk::split(x), chunk::split(z));
-                let y = self.columns[&(cx, cz)].col.height(lx, lz) + 1;
+                let y = self.lv.columns[&(cx, cz)].col.height(lx, lz) + 1;
                 let strike = Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5);
-                self.broadcast(&ToClient::Lightning { pos: strike.to_array() });
-                for p in self.players.values() {
+                self.broadcast_dim(&ToClient::Lightning { pos: strike.to_array() });
+                for p in self.players.values().filter(|p| p.dim == 0) {
                     if p.pos().distance(strike) < 3.5 {
                         p.send(&ToClient::Damage { amount: 5.0, from: strike.to_array() });
                     }
@@ -866,7 +1086,7 @@ impl World {
     }
 
     fn tick_growth(&mut self) {
-        let list: Vec<[i32; 3]> = self.growing.iter().copied().collect();
+        let list: Vec<[i32; 3]> = self.lv.growing.iter().copied().collect();
         for pos in list {
             if !self.loaded(pos[0], pos[2]) {
                 continue;
@@ -886,11 +1106,11 @@ impl World {
                 let next = (b + 1).min(block::WHEAT_3);
                 self.set_block(pos, next);
                 if next != block::WHEAT_3 {
-                    self.growing.insert(pos);
+                    self.lv.growing.insert(pos);
                 }
             }
             block::SAPLING => {
-                self.growing.remove(&pos);
+                self.lv.growing.remove(&pos);
                 let kind = if self.rand() < 0.3 { worldgen::TreeKind::Birch } else { worldgen::TreeKind::Oak };
                 let tree = worldgen::Tree { x: pos[0], y: pos[1] - 1, z: pos[2], kind, height: 4 + (self.rand() * 3.0) as i32 };
                 let mut puts = Vec::new();
@@ -906,7 +1126,7 @@ impl World {
                 }
             }
             _ => {
-                self.growing.remove(&pos);
+                self.lv.growing.remove(&pos);
             }
         }
     }
@@ -921,8 +1141,8 @@ impl World {
             self.spawns.insert(name, spawn);
             self.dirty = true;
         }
-        let total = self.players.len();
-        let asleep = self.players.values().filter(|p| p.sleeping).count();
+        let total = self.players.values().filter(|p| p.dim == 0).count();
+        let asleep = self.players.values().filter(|p| p.sleeping && p.dim == 0).count();
         if bed.is_some() && total > 1 {
             self.system(format!("{asleep}/{total} players sleeping"));
         }
@@ -993,6 +1213,64 @@ mod tests {
     }
 
     #[test]
+    fn a_player_rides_a_vehicle_and_crosses_to_the_sky_realm() {
+        let dir = std::env::temp_dir().join(format!("runecraft-realm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cfg = Config { bind: "127.0.0.1:0".into(), world_dir: dir.clone(), ..Default::default() };
+        let mut server = start(cfg).unwrap();
+        let mut s = TcpStream::connect(server.addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        write_frame(&mut s, &ToServer::Hello { name: "rider".into(), version: PROTOCOL_VERSION, view_distance: 2, skin: 0 }).unwrap();
+        let mut r = io::BufReader::new(s.try_clone().unwrap());
+        let mut spawn = [0.0; 3];
+        loop {
+            if let ToClient::Welcome { spawn: sp, dim, .. } = read_frame::<ToClient, _>(&mut r).unwrap() {
+                assert_eq!(dim, 0);
+                spawn = sp;
+                break;
+            }
+        }
+        // A boat put down beside you: get in, and the server knows you're its driver.
+        write_frame(&mut s, &ToServer::PlaceVehicle { kind: VehicleKind::Boat, pos: spawn, yaw: 0.0 }).unwrap();
+        let id = loop {
+            if let ToClient::Vehicles(v) = read_frame::<ToClient, _>(&mut r).unwrap()
+                && let Some(b) = v.first()
+            {
+                break b.id;
+            }
+        };
+        write_frame(&mut s, &ToServer::Mount { id, seat: 0 }).unwrap();
+        write_frame(&mut s, &ToServer::VehicleMove { id, pos: [spawn[0] + 3.0, spawn[1], spawn[2]], yaw: 1.0, speed: 2.0, cars: vec![] }).unwrap();
+        loop {
+            if let ToClient::Vehicles(v) = read_frame::<ToClient, _>(&mut r).unwrap()
+                && v.iter().any(|b| b.riders == vec![(0, 1)] && (b.pos[0] - spawn[0] - 3.0).abs() < 0.01)
+            {
+                break;
+            }
+        }
+        // Off to the Sky realm: a portal is built there and its chunks arrive.
+        write_frame(&mut s, &ToServer::Chat("/realm sky".into())).unwrap();
+        let mut arrived = None;
+        let mut columns = 0;
+        while columns < 3 {
+            match read_frame::<ToClient, _>(&mut r).unwrap() {
+                ToClient::Dimension { dim, pos } => arrived = Some((dim, pos)),
+                ToClient::Column { .. } if arrived.is_some() => columns += 1,
+                _ => {}
+            }
+        }
+        let (dim, pos) = arrived.unwrap();
+        assert_eq!(dim, 2);
+        assert!(pos[1] > 40.0, "you arrive up among the islands");
+        drop(s);
+        server.stop();
+        let w = World::open(Config { world_dir: dir.clone(), ..Default::default() });
+        assert_eq!(w.saved_pos.get("rider").map(|p| p.1), Some(2), "and the world remembers you're there");
+        assert!(w.level(0).vehicles.values().any(|v| v.kind == VehicleKind::Boat), "the boat is saved");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn water_flows_down_and_out() {
         let dir = std::env::temp_dir().join(format!("runecraft-fluid-{}", std::process::id()));
         let cfg = Config { world_dir: dir, ..Default::default() };
@@ -1005,7 +1283,7 @@ mod tests {
         }
         for cz in -1..=1 {
             for cx in -1..=1 {
-                w.columns.insert((cx, cz), Loaded { col: col.clone(), encoded: None });
+                w.lv.columns.insert((cx, cz), Loaded { col: col.clone(), encoded: None });
             }
         }
         w.set_block([8, 13, 8], block::WATER);

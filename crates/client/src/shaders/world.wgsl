@@ -9,7 +9,7 @@ struct U {
     sky_top: vec4<f32>,
     sky_hor: vec4<f32>,  // rgb, fog end
     fog: vec4<f32>,      // rgb, fog start
-    misc: vec4<f32>,     // srgb target, underwater, flash, unused
+    misc: vec4<f32>,     // srgb target, underwater, flash, ambient (no sky)
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -74,7 +74,7 @@ fn lit(rgb: vec3<f32>, light: vec4<f32>, world: vec3<f32>) -> vec3<f32> {
     }
     let sky = light.x * u.sun.w;
     let blk = light.y;
-    let l = max(sky, blk);
+    let l = max(max(sky, blk), u.misc.w);
     let b = pow(l, 1.45) * 0.9 + 0.07;
     let warm = clamp((blk - sky) * 2.0, 0.0, 1.0);
     let tint = mix(vec3<f32>(1.0), vec3<f32>(1.0, 0.85, 0.66), warm);
@@ -147,7 +147,7 @@ fn fs_sky(i: SkyOut) -> @location(0) vec4<f32> {
     let far = u.inv_vp * vec4<f32>(i.ndc, 1.0, 1.0);
     let near = u.inv_vp * vec4<f32>(i.ndc, 0.0, 1.0);
     let dir = normalize(far.xyz / far.w - near.xyz / near.w);
-    if (u.misc.y > 0.5) {
+    if (u.misc.y > 0.5 || u.misc.w > 0.0) {
         return vec4<f32>(to_target(u.fog.xyz), 1.0);
     }
     let h = dir.y;
