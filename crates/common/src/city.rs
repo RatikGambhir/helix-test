@@ -23,6 +23,10 @@ pub enum Style {
     Tokyo,
     Paris,
     London,
+    Chicago,
+    Sydney,
+    Dubai,
+    Rome,
 }
 
 #[derive(Debug)]
@@ -40,9 +44,13 @@ pub struct City {
     pub ring_river: bool,
     /// A spot worth arriving at, relative to the centre.
     pub arrive: (i32, i32),
+    /// Subway tunnels under the avenues, with stairs down from the sidewalk.
+    pub subway: bool,
+    /// A river across the city (z range), with bridges on the avenues.
+    pub river: Option<(i32, i32)>,
 }
 
-pub static CITIES: [City; 4] = [
+pub static CITIES: [City; 8] = [
     City {
         name: "New York",
         blurb: "Skyscrapers, yellow cabs, Central Park, the Empire tower and Liberty island.",
@@ -53,7 +61,9 @@ pub static CITIES: [City; 4] = [
         bx: 44,
         bz: 30,
         ring_river: true,
-        arrive: (3, -40),
+        arrive: (8, -40),
+        subway: true,
+        river: None,
     },
     City {
         name: "Tokyo",
@@ -66,6 +76,8 @@ pub static CITIES: [City; 4] = [
         bz: 26,
         ring_river: false,
         arrive: (3, 3),
+        subway: true,
+        river: None,
     },
     City {
         name: "Paris",
@@ -78,6 +90,8 @@ pub static CITIES: [City; 4] = [
         bz: 30,
         ring_river: false,
         arrive: (3, 60),
+        subway: true,
+        river: None,
     },
     City {
         name: "London",
@@ -90,6 +104,64 @@ pub static CITIES: [City; 4] = [
         bz: 28,
         ring_river: false,
         arrive: (3, 38),
+        subway: true,
+        river: Some(THAMES),
+    },
+    City {
+        name: "Chicago",
+        blurb: "The Loop's L trains, the river, the tallest tower in town, the bean and Navy Pier on Lake Michigan.",
+        x: 2700,
+        z: 1000,
+        radius: 300,
+        style: Style::Chicago,
+        bx: 40,
+        bz: 30,
+        ring_river: false,
+        arrive: (8, -12),
+        subway: true,
+        river: Some(CHICAGO_RIVER),
+    },
+    City {
+        name: "Sydney",
+        blurb: "The opera house sails and the harbour bridge, across the water from the city.",
+        x: -2700,
+        z: -400,
+        radius: 240,
+        style: Style::Sydney,
+        bx: 36,
+        bz: 30,
+        ring_river: false,
+        arrive: (-69, -40),
+        subway: false,
+        river: None,
+    },
+    City {
+        name: "Dubai",
+        blurb: "Glass towers in the desert and the tallest building in the world.",
+        x: 300,
+        z: -2800,
+        radius: 240,
+        style: Style::Dubai,
+        bx: 48,
+        bz: 40,
+        ring_river: false,
+        arrive: (3, 3),
+        subway: false,
+        river: None,
+    },
+    City {
+        name: "Rome",
+        blurb: "Terracotta streets, umbrella pines and the ancient Colosseum.",
+        x: -2400,
+        z: 2500,
+        radius: 220,
+        style: Style::Rome,
+        bx: 30,
+        bz: 26,
+        ring_river: false,
+        arrive: (3, 3),
+        subway: false,
+        river: None,
     },
 ];
 
@@ -149,8 +221,15 @@ pub fn fill_column(_seed: u64, c: &'static City, x: i32, z: i32, put: Put<'_>) {
     if landmark(c, lx, lz, put) {
         return;
     }
-    if c.style == Style::London && (THAMES.0..THAMES.1).contains(&lz) {
-        river_crossing(c, lx, lz, true, THAMES, put);
+    if let Some(r) = c.river
+        && (r.0..r.1).contains(&lz)
+        && !sea(c, lx, lz)
+    {
+        river_crossing(c, lx, lz, true, r, put);
+        return;
+    }
+    if sea(c, lx, lz) {
+        open_water(c, lx, lz, put);
         return;
     }
     let (u, v) = (lx.rem_euclid(c.bx), lz.rem_euclid(c.bz));
@@ -161,11 +240,14 @@ pub fn fill_column(_seed: u64, c: &'static City, x: i32, z: i32, put: Put<'_>) {
     }
     if u < ROAD || v < ROAD {
         road(c, lx, lz, u, v, gx, gz, put);
+        elevated(c, lx, lz, u, v, put);
+        subway(c, lx, lz, u, v, put);
         return;
     }
     let side = ROAD + 2;
     if u < side || v < side || u >= c.bx - 2 || v >= c.bz - 2 {
         sidewalk(c, u, v, put);
+        subway(c, lx, lz, u, v, put);
         return;
     }
     if small_park(c, gx, gz) {
@@ -175,19 +257,132 @@ pub fn fill_column(_seed: u64, c: &'static City, x: i32, z: i32, put: Put<'_>) {
     building(c, gx, gz, u - side, v - side, x, z, put);
 }
 
+/// Chicago's L: elevated steel tracks over the avenues and streets around the Loop.
+fn elevated(c: &City, lx: i32, lz: i32, u: i32, v: i32, put: Put<'_>) {
+    if c.style != Style::Chicago || lx.abs() > 100 || lz.abs() > 100 {
+        return;
+    }
+    let (gx, gz) = (lx.div_euclid(c.bx), lz.div_euclid(c.bz));
+    let on_x = u < ROAD && (gx == -2 || gx == 2) && (-3..3).contains(&gz);
+    let on_z = v < ROAD && (gz == -3 || gz == 2) && (-2..=2).contains(&gx);
+    if !on_x && !on_z {
+        return;
+    }
+    let (across, along) = if on_x { (u, lz) } else { (v, lx) };
+    let deck = G + 8;
+    put(deck, STEEL);
+    if across == 0 || across == ROAD - 1 {
+        put(deck + 1, STEEL);
+        if along.rem_euclid(8) == 0 {
+            for y in (G + 1)..deck {
+                put(y, STEEL);
+            }
+        }
+    }
+    if across == 2 || across == 4 {
+        put(deck + 1, RAIL);
+    }
+}
+
+/// Lakes and harbours at the edge of town.
+fn sea(c: &City, lx: i32, lz: i32) -> bool {
+    match c.style {
+        Style::Chicago => lx >= 236,
+        Style::Sydney => lz < -60,
+        _ => false,
+    }
+}
+
+fn open_water(c: &City, lx: i32, lz: i32, put: Put<'_>) {
+    for y in (SEA_LEVEL - 8)..=G {
+        put(y, if y <= SEA_LEVEL { WATER } else { AIR });
+    }
+    put(SEA_LEVEL - 9, SAND);
+    // A low sea wall along the shore.
+    let shore = match c.style {
+        Style::Chicago => lx == 236,
+        Style::Sydney => lz == -61,
+        _ => false,
+    };
+    if shore {
+        for y in (SEA_LEVEL - 8)..=G {
+            put(y, STONE_BRICK);
+        }
+        put(G + 1, STONE_BRICK);
+    }
+}
+
+/// Subway tunnels under every other avenue, with lit platforms and stairs up to the sidewalk.
+fn subway(c: &City, lx: i32, lz: i32, u: i32, v: i32, put: Put<'_>) {
+    if !c.subway || lx.abs().max(lz.abs()) > c.radius - 24 {
+        return;
+    }
+    if let Some(r) = c.river
+        && (r.0 - 3..r.1 + 3).contains(&lz)
+    {
+        return;
+    }
+    let gx = lx.div_euclid(c.bx);
+    if gx.rem_euclid(2) != 0 {
+        return;
+    }
+    let (floor, ceiling) = (G - 8, G - 2);
+    if u < ROAD {
+        put(floor, STONE_BRICK);
+        for y in (floor + 1)..ceiling {
+            let wall = u == 0 || u == ROAD - 1;
+            put(y, if wall { STONE_BRICK } else { AIR });
+        }
+        if u == 2 || u == 4 {
+            put(floor + 1, RAIL);
+        }
+        if u == 3 && v % 8 == 0 {
+            put(ceiling, GLOWSTONE);
+        }
+        // The station wall opens onto the stairs.
+        let gz = lz.div_euclid(c.bz);
+        if u == ROAD - 1 && gz.rem_euclid(2) == 0 && (ROAD + 6..ROAD + 9).contains(&v) {
+            for y in (floor + 1)..(floor + 4) {
+                put(y, AIR);
+            }
+        }
+        return;
+    }
+    // Stairs down from the sidewalk next to the avenue.
+    let gz = lz.div_euclid(c.bz);
+    if (u == ROAD || u == ROAD + 1) && gz.rem_euclid(2) == 0 {
+        let k = v - (ROAD + 2);
+        if (0..9).contains(&k) {
+            let step = (floor + 7 - k).max(floor);
+            put(step, STONE_BRICK);
+            for y in (step + 1)..=G {
+                put(y, AIR);
+            }
+            if k >= 6 {
+                for y in (floor + 1)..(floor + 4) {
+                    put(y, AIR);
+                }
+                put(floor, STONE_BRICK);
+            }
+        } else if k == -1 && u == ROAD + 1 {
+            put(G + 1, STEEL);
+            put(G + 2, STEEL);
+            put(G + 3, LANTERN);
+        }
+    }
+}
+
 /// The lot's depth and this column's row in it, trimmed where a river cuts the lot.
 fn lot_rows(c: &City, gz: i32, iv: i32) -> (i32, i32) {
     let d = c.bz - ROAD - 4;
-    if c.style != Style::London {
-        return (iv, d);
-    }
+    let Some(river) = c.river else { return (iv, d) };
     let z0 = gz * c.bz + ROAD + 2;
     let (mut lo, mut hi) = (z0, z0 + d);
-    if lo < THAMES.1 && hi > THAMES.1 {
-        lo = THAMES.1;
+    if lo < river.1 && hi > river.1 {
+        lo = river.1;
     }
-    if hi > THAMES.0 && lo < THAMES.0 {
-        hi = THAMES.0;
+    if hi > river.0 && lo < river.0 {
+        hi = river.0;
     }
     (z0 + iv - lo, hi - lo)
 }
@@ -219,7 +414,7 @@ fn road(c: &City, _lx: i32, _lz: i32, u: i32, v: i32, gx: i32, gz: i32, put: Put
         return;
     }
     if across == mid && (along / 2) % 2 == 0 {
-        put(G, if c.style == Style::NewYork || c.style == Style::Tokyo { ROAD_LINE } else { ROAD_WHITE });
+        put(G, if matches!(c.style, Style::NewYork | Style::Tokyo | Style::Chicago | Style::Dubai) { ROAD_LINE } else { ROAD_WHITE });
     }
     // Parked cars: one per lane per block, sometimes.
     let seg = if av { hash2(c.salt() ^ 0xCA2, gx, gz) } else { hash2(c.salt() ^ 0xCA3, gx, gz) };
@@ -314,6 +509,43 @@ fn river_ring(c: &City, lx: i32, lz: i32, put: Put<'_>) {
     let (across, along) = if ns { (u, lz) } else { (v, lx) };
     put(G, if across == ROAD / 2 { ROAD_LINE } else { ASPHALT });
     put(G - 1, STEEL);
+    // The east-side bridge on the middle street is the great stone suspension bridge.
+    if !ns && lx > 0 && gz == 0 {
+        let out = along - c.radius;
+        let tower = (5..9).contains(&out) || (15..19).contains(&out);
+        if tower {
+            for y in (SEA_LEVEL - 6)..(G + 34) {
+                let rel = y - G;
+                let opening = (1..=ROAD - 2).contains(&across) && (1..22).contains(&rel);
+                let window = (1..=ROAD - 2).contains(&across) && (24..30).contains(&rel);
+                if !opening && !window {
+                    put(y, STONE_BRICK);
+                }
+            }
+            return;
+        }
+        if across == 0 || across == ROAD - 1 {
+            // Main cables hang between the towers and down to the shores.
+            let cable = |a: i32, b: i32, sag: f32| {
+                let t = (out - a) as f32 / (b - a) as f32;
+                G + 33 - (sag * 4.0 * t * (1.0 - t)) as i32
+            };
+            let y = if out < 5 {
+                G + 2 + (out.max(0) * 31 / 5)
+            } else if out < 15 {
+                cable(8, 15, 20.0)
+            } else {
+                G + 33 - ((out - 18).max(0) * 31 / 6)
+            };
+            put(y.max(G + 1), STEEL);
+            if along % 2 == 0 {
+                for yy in (G + 1)..y {
+                    put(yy, STEEL);
+                }
+            }
+        }
+        return;
+    }
     if across == 0 || across == ROAD - 1 {
         put(G + 1, STEEL);
         if along % 6 == 0 {
@@ -340,6 +572,10 @@ fn big_park(c: &City, lx: i32, lz: i32) -> bool {
         Style::Tokyo => inside(67, -71, 120, -26),
         Style::Paris => inside(-34, 104, 38, 178),
         Style::London => inside(-197, 35, -109, 112) && !(THAMES.0..THAMES.1).contains(&lz),
+        Style::Chicago => inside(120, 0, 236, 120),
+        Style::Sydney => inside(-140, 0, -80, 80),
+        Style::Dubai => false,
+        Style::Rome => inside(80, -160, 160, -90),
     }
 }
 
@@ -356,7 +592,9 @@ fn pond(c: &City, lx: i32, lz: i32) -> bool {
         Style::NewYork => ell(91.0, -200.0, 18.0, 30.0),
         Style::Tokyo => ell(80.0, -40.0, 6.0, 5.0),
         Style::London => ell(-150.0, 80.0, 30.0, 8.0),
-        Style::Paris => false,
+        Style::Chicago => ell(190.0, 95.0, 7.0, 7.0),
+        Style::Rome => ell(120.0, -125.0, 10.0, 6.0),
+        _ => false,
     }
 }
 
@@ -393,6 +631,7 @@ fn park_tree(c: &City, gx: i32, gz: i32) -> Option<Tree> {
     let kind = match c.style {
         Style::Tokyo => TreeKind::Cherry,
         Style::London if (h >> 40) % 3 == 0 => TreeKind::Birch,
+        Style::Rome => TreeKind::Spruce,
         _ if (h >> 40) % 5 == 0 => TreeKind::Birch,
         _ => TreeKind::Oak,
     };
@@ -527,6 +766,45 @@ fn spec_for(c: &City, gx: i32, gz: i32, part: u64) -> Spec {
             let height = if r < 0.5 { 20 } else { 24 };
             Spec { pattern: 1, mansard: true, roof: SLATE, floor: PLANKS, ..Spec::plain(height, LIMESTONE, WINDOW_DARK) }
         }
+        Style::Chicago => {
+            let height = round4(14.0 + f.powf(1.1) * 130.0 * (0.35 + 0.65 * r));
+            let mut s = match (h >> 12) % 4 {
+                0 => Spec { pattern: 0, pillar: STEEL, ..Spec::plain(height, CONCRETE_DARK, WINDOW_DARK) },
+                1 => Spec { pattern: 1, ..Spec::plain(height, TERRACOTTA, WINDOW_DARK) },
+                2 => Spec { pattern: 2, ..Spec::plain(height, LIMESTONE, WINDOW_BLUE) },
+                _ => Spec { pattern: 2, ..Spec::plain(height, BRICK, WINDOW_DARK) },
+            };
+            if height > 80 && r2 < 0.4 {
+                s.setbacks = [(3, height * 70 / 100), (0, i32::MAX), (0, i32::MAX), (0, i32::MAX)];
+            }
+            s
+        }
+        Style::Sydney => {
+            let height = round4(10.0 + f * 90.0 * (0.3 + 0.7 * r));
+            if (h >> 12) % 3 == 0 {
+                Spec { pattern: 1, roof: TERRACOTTA, ..Spec::plain(height.min(24), SANDSTONE, WINDOW_DARK) }
+            } else {
+                Spec { pattern: 0, pillar: STEEL, ..Spec::plain(height, CONCRETE_WHITE, WINDOW_BLUE) }
+            }
+        }
+        Style::Dubai => {
+            let height = round4(20.0 + f.powf(0.8) * 130.0 * (0.4 + 0.6 * r));
+            let mut s = match (h >> 12) % 3 {
+                0 => Spec { pattern: 0, pillar: STEEL, ..Spec::plain(height, CONCRETE_WHITE, WINDOW_BLUE) },
+                1 => Spec { pattern: 0, pillar: GOLD_BLOCK, ..Spec::plain(height, SANDSTONE, WINDOW_DARK) },
+                _ => Spec { pattern: 0, pillar: STEEL, ..Spec::plain(height, STEEL, WINDOW_BLUE) },
+            };
+            if height > 70 {
+                s.setbacks = [(2, height * 60 / 100), (4, height * 80 / 100), (0, i32::MAX), (0, i32::MAX)];
+                s.spire = if r2 < 0.5 { height / 5 } else { 0 };
+            }
+            s
+        }
+        Style::Rome => {
+            let height = 12 + 4 * ((h >> 14) % 3) as i32;
+            let wall = [TERRACOTTA, LIMESTONE, SANDSTONE, TERRACOTTA][((h >> 18) % 4) as usize];
+            Spec { pattern: 1, roof: TERRACOTTA, floor: PLANKS, ..Spec::plain(height, wall, WINDOW_DARK) }
+        }
         Style::London => {
             if r < 0.06 && f > 0.3 {
                 let height = round4(50.0 + 70.0 * r2);
@@ -550,7 +828,9 @@ fn building(c: &City, gx: i32, gz: i32, iu: i32, iv: i32, x: i32, z: i32, put: P
     let parts = match c.style {
         Style::NewYork => 1 + (h % 2) as i32,
         Style::Tokyo => 1 + (h % 3) as i32,
-        Style::Paris | Style::London => 2 + (h % 3) as i32,
+        Style::Paris | Style::London | Style::Rome => 2 + (h % 3) as i32,
+        Style::Chicago | Style::Sydney => 1 + (h % 2) as i32,
+        Style::Dubai => 1,
     };
     let p = iu * parts / w;
     let start = (0..w).find(|&i| i * parts / w == p).unwrap_or(0);
@@ -682,14 +962,19 @@ fn bcol(s: &Spec, fu: i32, fv: i32, fw: i32, fd: i32, x: i32, z: i32, put: Put<'
 // Landmarks
 
 const THAMES: (i32, i32) = (44, 68);
+const CHICAGO_RIVER: (i32, i32) = (-62, -44);
 
 fn landmark_area(c: &City, lx: i32, lz: i32) -> bool {
     let r = |x0: i32, z0: i32, x1: i32, z1: i32| (x0..x1).contains(&lx) && (z0..z1).contains(&lz);
     match c.style {
-        Style::NewYork => r(-35, 39, -2, 58),
-        Style::Tokyo => r(-93, 47, -57, 83),
-        Style::Paris => r(-34, 106, 36, 176) || r(-13, -13, 20, 20),
-        Style::London => r(10, 70, 90, 86) || r(40, 26, 100, 44) || r(-96, -96, -64, -64),
+        Style::NewYork => r(-35, 39, -2, 58) || r(-171, 185, -129, 227),
+        Style::Tokyo => r(-93, 47, -57, 83) || r(95, -150, 126, -119),
+        Style::Paris => r(-34, 106, 36, 176) || r(-13, -13, 20, 20) || r(-101, -81, -59, -39),
+        Style::London => r(10, 70, 90, 86) || r(40, 26, 100, 44) || r(-96, -96, -64, -64) || r(120, 40, 166, 72),
+        Style::Chicago => r(-76, 24, -44, 56) || r(146, 28, 176, 52) || r(236, -40, 300, -27),
+        Style::Sydney => r(10, -140, 90, -70) || r(-75, -229, -62, -60),
+        Style::Dubai => r(40, 40, 81, 81),
+        Style::Rome => r(26, 26, 95, 87),
     }
 }
 
@@ -698,11 +983,25 @@ fn landmark(c: &City, lx: i32, lz: i32, put: Put<'_>) -> bool {
         return false;
     }
     match c.style {
-        Style::NewYork => empire(lx + 35, lz - 39, lx, lz, put),
-        Style::Tokyo => tokyo_tower(lx + 75, lz - 65, put),
+        Style::NewYork => {
+            if lz > 150 {
+                one_wtc(lx + 150, lz - 206, put)
+            } else {
+                empire(lx + 35, lz - 39, lx, lz, put)
+            }
+        }
+        Style::Tokyo => {
+            if lx > 90 {
+                skytree(lx - 110, lz + 135, put)
+            } else {
+                tokyo_tower(lx + 75, lz - 65, put)
+            }
+        }
         Style::Paris => {
             if (-13..20).contains(&lx) && (-13..20).contains(&lz) {
                 arch(lx - 3, lz - 3, put)
+            } else if lx < -50 {
+                louvre(lx + 80, lz + 60, put)
             } else {
                 eiffel(lx - 1, lz - 141, put)
             }
@@ -710,12 +1009,32 @@ fn landmark(c: &City, lx: i32, lz: i32, put: Put<'_>) -> bool {
         Style::London => {
             if (40..100).contains(&lx) && (26..44).contains(&lz) {
                 big_wheel(lx, lz, put)
+            } else if lx >= 120 {
+                tower_bridge(lx, lz, put)
             } else if lz < 0 {
                 shard(lx + 80, lz + 80, put)
             } else {
                 parliament(lx, lz, put)
             }
         }
+        Style::Chicago => {
+            if lx < 0 {
+                willis(lx + 60, lz - 40, put)
+            } else if lx < 200 {
+                bean(lx - 161, lz - 40, put)
+            } else {
+                navy_pier(lx, lz, put)
+            }
+        }
+        Style::Sydney => {
+            if lx < 0 {
+                harbour_bridge(lx + 69, lz, put)
+            } else {
+                opera_house(lx - 50, lz + 105, put)
+            }
+        }
+        Style::Dubai => burj(lx - 60, lz - 60, put),
+        Style::Rome => colosseum(lx - 60, lz - 56, put),
     }
     true
 }
@@ -1069,6 +1388,389 @@ fn shard(dx: i32, dz: i32, put: Put<'_>) {
         for y in (G + height)..(G + height + 10) {
             put(y, STEEL);
         }
+    }
+}
+
+
+/// The tapering glass tower downtown, its corners chamfered as it rises.
+fn one_wtc(dx: i32, dz: i32, put: Put<'_>) {
+    put(G, MARBLE);
+    let (ax, az) = (dx.abs() as f32, dz.abs() as f32);
+    let height = 160;
+    for rel in 0..height {
+        let t = rel as f32 / height as f32;
+        let half = 13.0 * (1.0 - t * 0.35);
+        let diamond = 26.0 * (1.0 - t * 0.62);
+        if ax > half || az > half || ax + az > diamond {
+            continue;
+        }
+        let shell = ax > half - 1.0 || az > half - 1.0 || ax + az > diamond - 1.4;
+        let y = G + 1 + rel;
+        if shell {
+            put(y, if rel < 16 { WINDOW_DARK } else if rel % 24 == 23 { STEEL } else { WINDOW_BLUE });
+        } else if rel % 4 == 0 {
+            put(y, if dx.rem_euclid(5) == 2 && dz.rem_euclid(5) == 2 { GLOWSTONE } else { CONCRETE_GRAY });
+        }
+    }
+    if ax <= 1.0 && az <= 1.0 {
+        put(G + height + 1, STEEL);
+    }
+    if dx == 0 && dz == 0 {
+        for y in (G + height + 1)..(G + height + 26) {
+            put(y, STEEL);
+        }
+        put(G + height + 26, LANTERN);
+    }
+}
+
+/// The white lattice broadcast tower with two ring decks.
+fn skytree(dx: i32, dz: i32, put: Put<'_>) {
+    put(G, CONCRETE_WHITE);
+    let d = ((dx * dx + dz * dz) as f32).sqrt();
+    let height = 178;
+    for rel in 0..height {
+        let t = rel as f32 / height as f32;
+        let r = 3.0 + 10.0 * (1.0 - t).powf(1.6);
+        let y = G + 1 + rel;
+        let deck = |at: i32, extra: f32| (at..at + 5).contains(&rel) && d <= r + extra;
+        if deck(100, 4.0) || deck(140, 3.0) {
+            let k = if (100..105).contains(&rel) { rel - 100 } else { rel - 140 };
+            let rim = d > r + 2.0;
+            put(y, if k == 0 || k == 4 { STEEL } else if rim { WINDOW_BLUE } else if d < r - 1.0 { AIR } else { CONCRETE_WHITE });
+            continue;
+        }
+        if (d - r).abs() < 0.8 {
+            let ang = (dz as f32).atan2(dx as f32);
+            let lattice = ((ang * 8.0 / std::f32::consts::PI + rel as f32 * 0.25).rem_euclid(2.0)) < 0.7 || rel % 10 == 0;
+            if lattice {
+                put(y, if rel % 20 < 10 { CONCRETE_WHITE } else { STEEL });
+            }
+        } else if d < 1.5 {
+            put(y, STEEL);
+        }
+    }
+    if dx == 0 && dz == 0 {
+        put(G + height + 1, LANTERN);
+    }
+}
+
+/// A glass pyramid in a stone courtyard.
+fn louvre(dx: i32, dz: i32, put: Put<'_>) {
+    put(G, if (dx + dz).rem_euclid(4) == 0 { MARBLE } else { LIMESTONE });
+    let m = dx.abs().max(dz.abs());
+    if m <= 10 {
+        let h = 10 - m;
+        for y in 1..=h {
+            put(G + y, if y == h { GLASS } else { AIR });
+        }
+        put(G + h + 1, if m == 0 { GLASS } else { AIR });
+        if m == 10 || dx.abs() == dz.abs() {
+            put(G + h.max(1), STEEL);
+        }
+    } else if m > 18 {
+        // Fountain pools around it.
+        put(G, WATER);
+    }
+}
+
+/// Twin stone towers over the Thames with a road deck and a high walkway.
+fn tower_bridge(lx: i32, lz: i32, put: Put<'_>) {
+    let in_river = (THAMES.0..THAMES.1).contains(&lz);
+    if in_river {
+        for y in (SEA_LEVEL - 6)..=G {
+            put(y, if y <= SEA_LEVEL { WATER } else { AIR });
+        }
+        put(SEA_LEVEL - 7, SAND);
+    } else {
+        put(G, SIDEWALK);
+    }
+    let (x0, x1) = (137, 145);
+    if !(x0..x1).contains(&lx) {
+        return;
+    }
+    let tower = |z0: i32| (z0..z0 + 6).contains(&lz);
+    let across = lx - x0;
+    if in_river && (tower(48) || tower(58)) {
+        let edge = across == 0 || across == 7 || lz == 48 || lz == 53 || lz == 58 || lz == 63;
+        for y in (SEA_LEVEL - 6)..(G + 30) {
+            let rel = y - G;
+            let arch = !edge && rel >= 0 && rel < 6;
+            let window = edge && rel > 6 && rel % 6 == 3 && (across == 3 || across == 4 || (lz - 48).rem_euclid(5) == 2);
+            if arch {
+                put(y, if rel == 0 { ASPHALT } else { AIR });
+            } else {
+                put(y, if window { WINDOW_DARK } else { LIMESTONE });
+            }
+        }
+        // Slate spires.
+        for k in 0..4 {
+            let inset = k;
+            if across >= inset && across <= 7 - inset && (lz - if tower(48) { 48 } else { 58 }) >= inset && (lz - if tower(48) { 48 } else { 58 }) <= 5 - inset {
+                for y in 0..3 {
+                    put(G + 30 + k * 3 + y, SLATE);
+                }
+            }
+        }
+        return;
+    }
+    // Road deck and railings; the walkway high above between the towers.
+    put(G, if across == 4 { ROAD_LINE } else { ASPHALT });
+    put(G - 1, STEEL);
+    if across == 0 || across == 7 {
+        put(G + 1, STEEL);
+    }
+    if (54..58).contains(&lz) {
+        put(G + 24, STEEL);
+        if across == 0 || across == 7 {
+            put(G + 25, STEEL);
+            put(G + 26, STEEL);
+        }
+    }
+    // Suspension chains sweeping down to the banks.
+    if across == 0 || across == 7 {
+        let chain = |z: i32, from: i32, to: i32, top: i32, low: i32| {
+            let t = (z - from) as f32 / (to - from) as f32;
+            low + ((top - low) as f32 * t * t) as i32
+        };
+        let y = if lz < 48 {
+            Some(chain(lz, 40, 48, G + 20, G + 2))
+        } else if lz > 63 {
+            Some(chain(72 - lz + 63, 63, 72, G + 2, G + 20))
+        } else {
+            None
+        };
+        if let Some(y) = y {
+            put(y, STEEL);
+        }
+    }
+}
+
+/// The black stepped tower of bundled tubes, with twin antennas.
+fn willis(dx: i32, dz: i32, put: Put<'_>) {
+    put(G, CONCRETE_DARK);
+    if dx.abs() > 14 || dz.abs() > 14 {
+        return;
+    }
+    // Nine tubes in a 3×3; each stops at its own height.
+    let (tx, tz) = ((dx + 15) / 10, (dz + 15) / 10);
+    let heights = [[100, 140, 120], [150, 178, 150], [120, 160, 100]];
+    let h = heights[tz.clamp(0, 2) as usize][tx.clamp(0, 2) as usize];
+    let edge = dx.abs() == 14 || dz.abs() == 14;
+    for rel in 0..h {
+        let y = G + 1 + rel;
+        let inner_edge = (dx + 15) % 10 == 0 || (dz + 15) % 10 == 0;
+        if edge || (inner_edge && heights_drop(dx, dz, rel, &heights)) {
+            put(y, if rel % 4 == 0 { STEEL } else { WINDOW_DARK });
+        } else if rel % 4 == 0 {
+            put(y, CONCRETE_DARK);
+        }
+    }
+    put(G + h + 1, STEEL);
+    if (dx == -4 || dx == 4) && dz == 0 {
+        for y in (G + h + 1)..(G + h + 14) {
+            put(y, CONCRETE_WHITE);
+        }
+    }
+}
+
+/// Where a shorter tube meets a taller one, its outside wall shows.
+fn heights_drop(dx: i32, dz: i32, rel: i32, heights: &[[i32; 3]; 3]) -> bool {
+    let (tx, tz) = (((dx + 15) / 10).clamp(0, 2), ((dz + 15) / 10).clamp(0, 2));
+    let mine = heights[tz as usize][tx as usize];
+    [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|(ox, oz)| {
+        let (nx, nz) = (tx + ox, tz + oz);
+        (0..3).contains(&nx) && (0..3).contains(&nz) && heights[nz as usize][nx as usize] < mine && rel >= heights[nz as usize][nx as usize]
+    })
+}
+
+/// The mirror-polished bean sculpture in the park.
+fn bean(dx: i32, dz: i32, put: Put<'_>) {
+    put(G, MARBLE);
+    for rel in 0..9 {
+        let (x, y, z) = (dx as f32 / 10.0, (rel as f32 - 4.0) / 4.0, dz as f32 / 6.5);
+        let d = x * x + y * y + z * z;
+        // Hollow underneath: the arch you can walk through.
+        let under = rel < 3 && dx.abs() < 5;
+        if d <= 1.0 && !under {
+            put(G + 1 + rel, IRON_BLOCK);
+        }
+    }
+}
+
+/// A long timber pier into the lake with lamps and a small wheel at the end.
+fn navy_pier(lx: i32, lz: i32, put: Put<'_>) {
+    for y in (SEA_LEVEL - 8)..=G {
+        put(y, if y <= SEA_LEVEL { WATER } else { AIR });
+    }
+    put(SEA_LEVEL - 9, SAND);
+    let dz = lz + 34;
+    put(G, PLANKS);
+    put(G - 1, SPRUCE_LOG);
+    if lx % 6 == 0 {
+        for y in (SEA_LEVEL - 8)..(G - 1) {
+            put(y, SPRUCE_LOG);
+        }
+    }
+    if dz.abs() == 6 {
+        put(G + 1, STEEL);
+        if lx % 10 == 0 {
+            put(G + 2, STEEL);
+            put(G + 3, LANTERN);
+        }
+    }
+    // The wheel near the end.
+    if lz == -34 {
+        let (cx, cy, r) = (282.0f32, (G + 14) as f32, 11.0f32);
+        let ddx = lx as f32 - cx;
+        for y in (G + 1)..(G + 28) {
+            let ddy = y as f32 - cy;
+            let d = (ddx * ddx + ddy * ddy).sqrt();
+            if (d - r).abs() < 0.7 || d < 1.2 || (d < r && (ddx.abs() < 0.5 || ddy.abs() < 0.5)) {
+                put(y, RED_STEEL);
+            }
+        }
+    }
+}
+
+/// The steel arch bridge over the harbour.
+fn harbour_bridge(dx: i32, lz: i32, put: Put<'_>) {
+    for y in (SEA_LEVEL - 8)..=G {
+        put(y, if y <= SEA_LEVEL { WATER } else { AIR });
+    }
+    put(SEA_LEVEL - 9, SAND);
+    let across = dx + 6;
+    let (z0, z1) = (-229, -60);
+    let pylon = lz < z0 + 8 || lz >= z1 - 8;
+    if pylon {
+        for y in (SEA_LEVEL - 8)..(G + 22) {
+            if !(across > 0 && across < 12 && y > G && y < G + 8) {
+                put(y, STONE_BRICK);
+            }
+        }
+        return;
+    }
+    put(G, if across == 6 { ROAD_LINE } else { ASPHALT });
+    put(G - 1, STEEL);
+    if across == 0 || across == 12 {
+        put(G + 1, STEEL);
+        // The arch, and hangers holding up the deck.
+        let mid = (z0 + z1) as f32 / 2.0;
+        let half = (z1 - z0) as f32 / 2.0 - 8.0;
+        let t = (lz as f32 - mid) / half;
+        let top = G + 6 + (44.0 * (1.0 - t * t)).max(0.0) as i32;
+        let low = G - 14 + (40.0 * (1.0 - t * t)).max(0.0) as i32;
+        put(top, STEEL);
+        put(top - 1, STEEL);
+        if low < G - 1 {
+            for y in low..(low + 2) {
+                put(y, STEEL);
+            }
+        }
+        if lz.rem_euclid(6) == 0 {
+            for y in (G + 2)..top {
+                put(y, STEEL);
+            }
+        }
+    }
+    if (across == 3 || across == 9) && lz.rem_euclid(14) == 0 {
+        put(G + 1, STEEL);
+        put(G + 2, LANTERN);
+    }
+}
+
+/// White shell roofs on a granite podium by the water.
+fn opera_house(dx: i32, dz: i32, put: Put<'_>) {
+    let podium = dx.abs() <= 36 && dz.abs() <= 30;
+    for y in (SEA_LEVEL - 8)..=G {
+        put(y, if podium { STONE_BRICK } else if y <= SEA_LEVEL { WATER } else { AIR });
+    }
+    if !podium {
+        return;
+    }
+    put(G, if (dx + dz) % 7 == 0 { SANDSTONE } else { MARBLE });
+    // Shells: overlapping sails facing the harbour (north, -z).
+    let shells = [(-18.0f32, -6.0f32, 34.0f32), (-6.0, -2.0, 30.0), (6.0, 2.0, 24.0), (16.0, 6.0, 18.0), (-14.0, 16.0, 20.0), (-2.0, 19.0, 16.0)];
+    let (x, z) = (dx as f32, dz as f32);
+    for (sx, sz, h) in shells {
+        let w = 9.0;
+        let lx = x - sx;
+        if lx.abs() > w {
+            continue;
+        }
+        let along = z - sz;
+        for rel in 1..(h as i32) {
+            let y = rel as f32;
+            // A curved sail: it leans toward the water as it rises.
+            let face = -(y / h).powf(1.6) * 12.0;
+            let width = w * (1.0 - (y / h).powf(2.0));
+            let back = 10.0 * (1.0 - y / h);
+            if lx.abs() <= width && along >= face - 1.2 && along <= face + back && (along - face < 1.2 || along > face + back - 1.2 || lx.abs() > width - 1.2) {
+                put(G + rel, if (rel + dx).rem_euclid(6) == 0 { CONCRETE_WHITE } else { MARBLE });
+            }
+        }
+    }
+}
+
+/// The tallest tower in the world, a three-lobed spike over a reflecting pool.
+fn burj(dx: i32, dz: i32, put: Put<'_>) {
+    let d = ((dx * dx + dz * dz) as f32).sqrt();
+    let ang = (dz as f32).atan2(dx as f32);
+    put(G, if d > 15.0 && d < 19.0 { WATER } else { MARBLE });
+    if d > 15.0 && d < 19.0 {
+        put(G - 1, WATER);
+        return;
+    }
+    let height = 172;
+    for rel in 0..height {
+        let t = rel as f32 / height as f32;
+        // Setbacks spiral up: the radius drops in steps.
+        let step = (t * 12.0).floor() / 12.0;
+        let r = (13.0 * (1.0 - step).powf(1.25)) * (0.72 + 0.28 * (3.0 * (ang + step * 2.0)).cos()) + 1.0;
+        if d > r {
+            continue;
+        }
+        let y = G + 1 + rel;
+        if d > r - 1.2 {
+            put(y, if rel % 8 == 7 { STEEL } else { WINDOW_BLUE });
+        } else if rel % 4 == 0 {
+            put(y, CONCRETE_WHITE);
+        }
+    }
+    if d < 1.5 {
+        for y in (G + 1 + height)..(G + 1 + height + 18) {
+            put(y, STEEL);
+        }
+        put(G + height + 19, LANTERN);
+    }
+}
+
+/// The ancient amphitheatre: tiers of arches around a sand arena, half of the top ring fallen.
+fn colosseum(dx: i32, dz: i32, put: Put<'_>) {
+    let (rx, rz) = (32.0f32, 27.0f32);
+    let e = ((dx as f32 / rx).powi(2) + (dz as f32 / rz).powi(2)).sqrt();
+    let e_in = 0.55;
+    put(G, if e < e_in { SAND } else { STONE_BRICK });
+    if e > 1.02 || e < e_in {
+        return;
+    }
+    let ang = (dz as f32 / rz).atan2(dx as f32 / rx);
+    let seg = ((ang + std::f32::consts::PI) / std::f32::consts::TAU * 64.0) as i32;
+    let ruined = ang > 0.4 && ang < 2.6;
+    let top = if ruined { 26 } else { 36 };
+    if e > 0.94 {
+        // The outer wall: three storeys of arches, then the attic.
+        for rel in 1..=top {
+            let tier = (rel - 1) / 9;
+            let in_arch = tier < 3 && (rel - 1) % 9 >= 1 && (rel - 1) % 9 <= 6 && seg % 2 == 0;
+            put(G + rel, if in_arch { AIR } else if (rel - 1) % 9 == 0 { SANDSTONE } else { LIMESTONE });
+        }
+        return;
+    }
+    // Seating slopes down to the arena.
+    let k = (e - e_in) / (0.94 - e_in);
+    let h = (k * (top as f32 - 6.0)) as i32;
+    for rel in 1..=h.max(1) {
+        put(G + rel, if rel == h { SANDSTONE } else { STONE_BRICK });
     }
 }
 

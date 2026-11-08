@@ -705,18 +705,18 @@ fn hand_vertices(s: &State) -> Vec<Vertex> {
     let up = right.cross(fwd);
     let swing = (s.swing * std::f32::consts::PI).sin();
     let walk = s.body.vel.with_y(0.0).length() * 0.012 * (s.t as f32 * 9.0).sin();
-    let at = eye + fwd * (0.75 - swing * 0.15) + right * (0.42 - swing * 0.12) - up * (0.42 + walk + swing * 0.08);
+    let at = eye + fwd * (0.8 - swing * 0.15) + right * (0.5 - swing * 0.12) - up * (0.46 + walk + swing * 0.08);
     let basis = Mat4::from_cols(right.extend(0.0), up.extend(0.0), (-fwd).extend(0.0), at.extend(1.0));
     let m = basis * Mat4::from_rotation_x(-swing * 0.8) * Mat4::from_rotation_y(0.5);
     let light = light_at(s, s.body.pos);
     match s.held_item() {
         Some(h) if block::is_flat(h.id) => {
             let t = block::item_tile(h.id);
-            push_box(&mut out, m * Mat4::from_rotation_y(-1.1), Vec3::new(-0.2, -0.05, -0.01), Vec3::new(0.4, 0.4, 0.02), [t; 6], light, 0);
+            push_box(&mut out, m * Mat4::from_rotation_y(-1.1), Vec3::new(-0.16, -0.04, -0.01), Vec3::new(0.32, 0.32, 0.02), [t; 6], light, 0);
         }
         Some(h) => {
             let tex = block::def(h.id).tex;
-            push_box(&mut out, m, Vec3::splat(-0.14), Vec3::splat(0.28), [tex[1], tex[1], tex[0], tex[2], tex[1], tex[1]], light, 0);
+            push_box(&mut out, m, Vec3::splat(-0.1), Vec3::splat(0.2), [tex[1], tex[1], tex[0], tex[2], tex[1], tex[1]], light, 0);
         }
         None => {
             let sk = person(s.skin);

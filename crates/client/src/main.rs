@@ -65,6 +65,10 @@ fn play_and_wait(s: &mut State, travel: Option<(f32, f32, f32)>, yaw: f32, pitch
         s.yaw = yaw;
         s.pitch = pitch;
         s.time_of_day = time;
+        if std::env::var_os("RUNECRAFT_AT").is_some() {
+            s.flying = true;
+            s.mode = game::Mode::Creative;
+        }
         let feet = s.body.pos.floor().as_ivec3();
         let ready = travelled && s.world.loaded(feet.x, feet.z) && s.world.columns.len() > 200 && s.world.pending() == 0;
         settled = if ready { settled + 1 } else { 0 };
@@ -133,11 +137,18 @@ fn main() {
             ("paris", |s| play_and_wait(s, Some(city(2)), 3.14, 0.35, 0.3)),
             ("london", |s| play_and_wait(s, Some(city(3)), 3.0, 0.2, 0.3)),
             ("chicago", |s| play_and_wait(s, Some(city(4)), 0.3, 0.3, 0.3)),
-            ("sydney", |s| play_and_wait(s, Some(city(5)), 0.0, 0.1, 0.3)),
-            ("dubai", |s| play_and_wait(s, Some(city(6)), 0.0, 0.35, 0.3)),
+            ("sydney", |s| play_and_wait(s, Some(city(5)), 1.07, 0.05, 0.3)),
+            ("dubai", |s| play_and_wait(s, Some(city(6)), 2.36, 0.5, 0.3)),
             ("rome", |s| play_and_wait(s, Some(city(7)), 0.0, 0.15, 0.3)),
             ("night", |s| play_and_wait(s, Some(city(1)), 3.6, 0.3, 0.9)),
             ("friends", friend_scene),
+            ("at", |s| {
+                // RUNECRAFT_AT="x,y,z,yaw,pitch[,time]": a camera anywhere, for screenshots.
+                let v: Vec<f32> = std::env::var("RUNECRAFT_AT").unwrap_or_default().split(',').filter_map(|p| p.trim().parse().ok()).collect();
+                if v.len() >= 5 {
+                    play_and_wait(s, Some((v[0], v[1], v[2])), v[3], v[4], v.get(5).copied().unwrap_or(0.3));
+                }
+            }),
             ("inventory", |s| {
                 play_and_wait(s, None, 0.6, -0.15, 0.3);
                 s.mode = game::Mode::Survival;

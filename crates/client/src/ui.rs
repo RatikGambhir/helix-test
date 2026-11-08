@@ -140,7 +140,7 @@ fn title(s: &State) -> El {
             .child(small_button("skin+", "›", |s| s.skin = (s.skin + 1) % 32)),
         row().gap(8.0)
             .center_y()
-            .child(label("New worlds", SMALL, rgba(0xb8c0cc, 1.0)).w(60.0))
+            .child(label("Mode", SMALL, rgba(0xb8c0cc, 1.0)).w(60.0))
             .child(button("survival", "Survival", s.mode == Mode::Survival, |s| s.mode = Mode::Survival))
             .child(button("creative", "Creative", s.mode == Mode::Creative, |s| s.mode = Mode::Creative)),
     ])
