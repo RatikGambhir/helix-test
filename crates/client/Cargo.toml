@@ -1,0 +1,13 @@
+[package]
+name = "cubeterra"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cubeterra-common.workspace = true
+cubeterra-server.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+rune = { git = "https://github.com/anomalyco/rune", rev = "3032900c3f492c2e7bfee69ccbaf20a6244ecc85" }
+wgpu = { version = "~30.0.1", default-features = false, features = ["std", "wgsl"] }

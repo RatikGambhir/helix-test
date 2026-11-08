@@ -1,7 +1,5 @@
-node_modules/
-dist/
-src-tauri/target/
-src-tauri/gen/
-*.local
+/target
+/worlds
+*.png
+!docs/*.png
 .DS_Store
-.vite/

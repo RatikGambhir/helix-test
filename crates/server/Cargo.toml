@@ -1,0 +1,18 @@
+[package]
+name = "cubeterra-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "cubeterra-server"
+path = "src/main.rs"
+
+[dependencies]
+cubeterra-common.workspace = true
+serde.workspace = true
+bincode.workspace = true
+glam.workspace = true
