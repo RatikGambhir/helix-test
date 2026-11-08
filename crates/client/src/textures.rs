@@ -787,25 +787,3 @@ impl Atlas {
         out
     }
 }
-
-/// The colour a block shows on the map, from its top texture.
-pub fn average(atlas: &Atlas, tile: u8) -> [u8; 3] {
-    let mut sum = [0u32; 3];
-    let mut n = 0;
-    for y in 0..16 {
-        for x in 0..16 {
-            let c = atlas.texel(tile, x, y);
-            if c[3] > 100 {
-                sum[0] += c[0] as u32;
-                sum[1] += c[1] as u32;
-                sum[2] += c[2] as u32;
-                n += 1;
-            }
-        }
-    }
-    let n = n.max(1);
-    [(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8]
-}
-
-#[allow(dead_code)]
-fn _unused(_: Rgb) {}

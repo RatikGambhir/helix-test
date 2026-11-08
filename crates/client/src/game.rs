@@ -148,7 +148,6 @@ pub struct State {
     pub space_tap: f64,
     pub explosions: Vec<(Vec3, f64)>,
     pub skin: u8,
-    pub inv_page: usize,
     pub hint_until: f64,
 }
 
@@ -245,7 +244,6 @@ impl State {
             space_tap: -1.0,
             explosions: Vec::new(),
             skin: 0,
-            inv_page: 0,
             hint_until: 0.0,
         }
     }

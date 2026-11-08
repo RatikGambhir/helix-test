@@ -89,7 +89,7 @@ pub static CITIES: [City; 4] = [
         bx: 34,
         bz: 28,
         ring_river: false,
-        arrive: (30, 90),
+        arrive: (3, 38),
     },
 ];
 
@@ -173,6 +173,23 @@ pub fn fill_column(_seed: u64, c: &'static City, x: i32, z: i32, put: Put<'_>) {
         return;
     }
     building(c, gx, gz, u - side, v - side, x, z, put);
+}
+
+/// The lot's depth and this column's row in it, trimmed where a river cuts the lot.
+fn lot_rows(c: &City, gz: i32, iv: i32) -> (i32, i32) {
+    let d = c.bz - ROAD - 4;
+    if c.style != Style::London {
+        return (iv, d);
+    }
+    let z0 = gz * c.bz + ROAD + 2;
+    let (mut lo, mut hi) = (z0, z0 + d);
+    if lo < THAMES.1 && hi > THAMES.1 {
+        lo = THAMES.1;
+    }
+    if hi > THAMES.0 && lo < THAMES.0 {
+        hi = THAMES.0;
+    }
+    (z0 + iv - lo, hi - lo)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -524,7 +541,11 @@ fn spec_for(c: &City, gx: i32, gz: i32, part: u64) -> Spec {
 
 fn building(c: &City, gx: i32, gz: i32, iu: i32, iv: i32, x: i32, z: i32, put: Put<'_>) {
     let w = c.bx - ROAD - 4;
-    let d = c.bz - ROAD - 4;
+    let (iv, d) = lot_rows(c, gz, iv);
+    if d < 5 {
+        put(G, SIDEWALK);
+        return;
+    }
     let h = hash2(c.salt() ^ 0x1075, gx, gz);
     let parts = match c.style {
         Style::NewYork => 1 + (h % 2) as i32,

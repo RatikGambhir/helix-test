@@ -329,7 +329,11 @@ fn build(job: &Job) -> Output {
                             cnt += 1;
                         }
                         let cnt = cnt.max(1);
-                        let (sk, bl) = ((sk * 17 / cnt) as u8, (bl * 17 / cnt) as u8);
+                        let (sk, mut bl) = ((sk * 17 / cnt) as u8, (bl * 17 / cnt) as u8);
+                        if def.light > 0 {
+                            // Light sources glow at full brightness.
+                            bl = 255;
+                        }
                         let ao_k = [0.48, 0.64, 0.82, 1.0][ao as usize];
                         let shade = (SHADE[d] * if def.kind == Kind::Liquid { 1.0 } else { ao_k } * 255.0) as u8;
                         let mut pos = [(x + c[0]) as f32 + ox, (y + c[1]) as f32 + oy, (z + c[2]) as f32 + oz];

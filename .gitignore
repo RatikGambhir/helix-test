@@ -1,5 +1,4 @@
 /target
 /worlds
-*.png
-!docs/*.png
+/*.png
 .DS_Store

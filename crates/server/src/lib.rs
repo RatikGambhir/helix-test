@@ -245,7 +245,6 @@ impl World {
                 }
             });
         }
-        let sy = worldgen::spawn_height(seed, 0, 0);
         let rng = hash(seed ^ 0xA11CE);
         World {
             seed,
@@ -262,7 +261,7 @@ impl World {
             fuses: Vec::new(),
             dirty: false,
             rng,
-            spawn: [0.5, sy as f32 + 0.1, 0.5],
+            spawn: worldgen::find_spawn(seed),
             cfg,
         }
     }

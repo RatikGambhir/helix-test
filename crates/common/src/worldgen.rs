@@ -371,6 +371,36 @@ pub fn spawn_height(seed: u64, x: i32, z: i32) -> i32 {
     y + 1
 }
 
+/// A safe place to start: open grass or sand near the origin, with headroom.
+pub fn find_spawn(seed: u64) -> [f32; 3] {
+    let mut cache: std::collections::HashMap<(i32, i32), Column> = std::collections::HashMap::new();
+    for r in 0i32..80 {
+        for i in 0..(8 * r).max(1) {
+            // Walk the square ring of radius r (in steps of 3 blocks).
+            let side = (2 * r).max(1);
+            let (k, s) = (i / side, i % side);
+            let (dx, dz) = match k {
+                0 => (-r + s, -r),
+                1 => (r, -r + s),
+                2 => (r - s, r),
+                _ => (-r, r - s),
+            };
+            let (x, z) = (dx * 3, dz * 3);
+            let (cx, cz) = (x.div_euclid(CHUNK), z.div_euclid(CHUNK));
+            let col = cache.entry((cx, cz)).or_insert_with(|| generate(seed, cx, cz));
+            let (lx, lz) = (x.rem_euclid(CHUNK), z.rem_euclid(CHUNK));
+            let y = col.height(lx, lz);
+            let top = col.get(lx, y, lz);
+            let clear = ((y + 1)..HEIGHT).all(|yy| !is_solid(col.get(lx, yy, lz)) && !is_liquid(col.get(lx, yy, lz)));
+            if y > SEA_LEVEL && (top == GRASS || top == SAND || top == SNOW) && clear {
+                return [x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5];
+            }
+        }
+    }
+    let y = spawn_height(seed, 0, 0);
+    [0.5, y as f32 + 1.0, 0.5]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +412,8 @@ mod tests {
         assert!(a.blocks == b.blocks);
         assert_eq!(a.get(0, 0, 0), BEDROCK);
         assert!(spawn_height(42, 0, 0) > SEA_LEVEL);
+        let s = find_spawn(42);
+        assert!(s[1] > SEA_LEVEL as f32);
     }
 
     #[test]

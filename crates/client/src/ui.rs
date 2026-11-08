@@ -279,8 +279,11 @@ fn on_key_up(s: &mut State, e: &KeyEvent, _: &mut Tx) -> bool {
 }
 
 fn game(s: &State, cx: &mut Cx<State>) -> El {
-    let scale = cx.env().scale.max(0.5);
-    let (w, h) = (s.screen_px.0 as f32 / scale, s.screen_px.1 as f32 / scale);
+    // The game element fills the window: its size is the window in points.
+    let [w, h] = cx.layout_size("game").unwrap_or_else(|| {
+        let scale = cx.env().scale.max(0.5);
+        [s.screen_px.0 as f32 / scale, s.screen_px.1 as f32 / scale]
+    });
     let mut root = el().key("game")
         .w_full()
         .h_full()
