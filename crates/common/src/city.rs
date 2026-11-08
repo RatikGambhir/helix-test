@@ -65,7 +65,7 @@ pub static CITIES: [City; 4] = [
         bx: 30,
         bz: 26,
         ring_river: false,
-        arrive: (3, 12),
+        arrive: (3, 3),
     },
     City {
         name: "Paris",

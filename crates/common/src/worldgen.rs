@@ -253,9 +253,9 @@ fn tree_in_cell(seed: u64, gx: i32, gz: i32) -> Option<Tree> {
         return None;
     }
     let density = match s.biome {
-        Biome::Forest => 0.7,
-        Biome::BirchForest => 0.6,
-        Biome::Cherry => 0.35,
+        Biome::Forest => 0.32,
+        Biome::BirchForest => 0.28,
+        Biome::Cherry => 0.18,
         Biome::Snowy => 0.12,
         Biome::Plains => 0.03,
         Biome::Mountains => 0.05,
@@ -364,9 +364,10 @@ pub fn spawn_height(seed: u64, x: i32, z: i32) -> i32 {
     let col = generate(seed, x.div_euclid(CHUNK), z.div_euclid(CHUNK));
     let (lx, lz) = (x.rem_euclid(CHUNK), z.rem_euclid(CHUNK));
     let mut y = HEIGHT - 2;
-    while y > 0 && !is_solid(col.get(lx, y, lz)) && !is_liquid(col.get(lx, y, lz)) {
+    while y > 0 && !is_opaque(col.get(lx, y, lz)) && !is_liquid(col.get(lx, y, lz)) {
         y -= 1;
     }
+    // Under a tree: stand next to it instead of inside the canopy.
     y + 1
 }
 
